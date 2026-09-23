@@ -115,7 +115,7 @@ function cardEl(c) {
   el.classList.toggle('commander', Boolean(c.commander));
   if (el.dataset.zone !== c.zone) {
     el.dataset.zone = c.zone;
-    el.lastChild.replaceChildren(...ACTIONS[c.zone].map(([act, a, b]) => {
+    el.querySelector(':scope > .actions').replaceChildren(...ACTIONS[c.zone].map(([act, a, b]) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.dataset.act = act;
@@ -344,9 +344,13 @@ function openPicker(card) {
   pickKind.select();
 }
 
+// Closed, the picker goes back where it lives, so no card is left holding
+// it: a card's children are its own, and its action strip is found by
+// class, not position.
 function closePicker() {
   pick.hidden = true;
   delete pick.dataset.uid;
+  journal.appendChild(pick);
 }
 
 pick.addEventListener('submit', (e) => {

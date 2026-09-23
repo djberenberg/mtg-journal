@@ -194,6 +194,7 @@ try {
   check('ctr opens a picker on the card, prefilled +1/+1 and focused', !(await el('#ctr-pick', 'e.hidden')) && (await el('#ctr-pick', "e.closest('.card')?.dataset.uid")) === hand[1].uid && (await el('#ctr-kind', 'e.value')) === '+1/+1' && (await evalJs('document.activeElement.id')) === 'ctr-kind');
   await key('Enter', 'Enter', 13); await sleep(80);
   let sq = await squares();
+  check('closed, the picker is not left inside the card', (await el('#ctr-pick', "e.closest('.card')")) === null && (await el('#ctr-pick', "e.parentElement.id")) === 'journal');
   check('enter adds a +1/+1 counter: one square, showing 1 and its kind; picker closes; logged', sq.length === 1 && sq[0].n === '1' && sq[0].k === '+1/+1' && (await el('#ctr-pick', 'e.hidden')) && /I put a \+1\/\+1 counter on Llanowar Elves \(1\)/.test((await ui()).log[0]), JSON.stringify(sq));
   await click(`${elvesSel} button[data-act="counter"]`); await sleep(50); await key('Enter', 'Enter', 13); await sleep(80); sq = await squares();
   check('a second +1/+1 stacks onto the same square: 2', sq.length === 1 && sq[0].n === '2', JSON.stringify(sq));
@@ -250,11 +251,24 @@ try {
   await click(`${elvesSel} .counter button[data-ctr="-1"]`); await sleep(50);
   check('(cleared for the checks that follow)', (await squares()).length === 0);
 
+  // the opponent's creature, after my card has been through the picker and a zone change
+  const delverSel = `.card[data-uid="${theirs[0].uid}"]`;
+  await click(`${delverSel} button[data-act="counter"]`); await sleep(80);
+  check('the picker opens on the opponent\'s card with its input intact and focused', (await el('#ctr-pick', "e.closest('.card')?.dataset.uid")) === theirs[0].uid && (await evalJs(`document.querySelector('#ctr-pick input')!==null`)) && (await evalJs('document.activeElement.id')) === 'ctr-kind' && (await el('#ctr-kind', 'e.value')) === '+1/+1');
+  await evalJs(`document.getElementById('ctr-kind').value=''`); await type('lore'); await key('Enter', 'Enter', 13); await sleep(100);
+  const oppSquares = await evalJs(`[...document.querySelectorAll('${delverSel} .counter')].map(s=>({n:s.querySelector('.n').textContent,k:s.querySelector('.k').textContent}))`);
+  check('a typed kind lands on the opponent\'s creature and is logged as theirs', oppSquares.length === 1 && oppSquares[0].k === 'lore' && oppSquares[0].n === '1' && /opponent puts a lore counter on Delver/.test((await ui()).log[0]), JSON.stringify(oppSquares));
+  await click(`${delverSel} .counter button[data-ctr="1"]`); await sleep(50);
+  check('+ on their square works too', (await evalJs(`document.querySelector('${delverSel} .counter .n').textContent`)) === '2');
+  await click(`${delverSel} .counter button[data-ctr="-1"]`); await click(`${delverSel} .counter button[data-ctr="-1"]`); await sleep(50);
+  check('(their square cleared)', (await evalJs(`document.querySelectorAll('${delverSel} .counter').length`)) === 0);
+  check('the action strip of a card that changed zone is still its own: exile shows field/hand/grave/cmd', (await evalJs(`[...document.querySelectorAll('.card[data-uid="${hand[1].uid}"] .actions button')].map(b=>b.textContent).join(' ')`)) === 'ctr grave exile hand cmd ×');
+
   // undo, persistence, unknown card
   const before = JSON.stringify(await state());
   await click('#undo'); await sleep(50);
-  check('undo brings back the counter just removed', (await squares()).length === 1 && (await squares())[0].k === 'lore');
-  await click(`${elvesSel} .counter button[data-ctr="-1"]`); await sleep(50);
+  check('undo brings back the counter just removed', (await evalJs(`document.querySelectorAll('${delverSel} .counter').length`)) === 1 && (await evalJs(`document.querySelector('${delverSel} .counter .k').textContent`)) === 'lore');
+  await click(`${delverSel} .counter button[data-ctr="-1"]`); await sleep(50);
   check('(redone by hand; state matches)', JSON.stringify(await state()) === before);
   const cardCount = (await state()).cards.length;
   await send('Page.navigate', { url: `${BASE}/` }); await sleep(800); u = await ui();

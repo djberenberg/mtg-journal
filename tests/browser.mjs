@@ -177,6 +177,8 @@ try {
   check('my lands row is below my other permanents; the opponent\'s is above theirs; an empty row is a thin labelled strip', rows.meLandsBelow && rows.oppLandsAbove && rows.emptyRowThin && rows.labels.every((l) => /lands|spells/.test(l)), JSON.stringify(rows));
   await type('forest'); await key('Enter', 'Enter', 13, 8); await sleep(300);
   check('the opponent\'s land goes to their lands row', (await zone('opp', 'battlefield')).find((c) => c.name === 'Forest')?.tier === 'lands');
+  const tierFit = JSON.parse(await evalJs(`(()=>{const out=[];for(const t of document.querySelectorAll('.tier')){const z=t.closest('.zone').getBoundingClientRect();const r=t.getBoundingClientRect();const cs=getComputedStyle(t,'::before');const lw=parseFloat(cs.width)||0;const label={left:r.right-parseFloat(cs.right)-lw,right:r.right-parseFloat(cs.right),top:r.top+parseFloat(cs.top),bottom:r.top+parseFloat(cs.top)+(parseFloat(cs.height)||12)};const covered=[...t.querySelectorAll('.card')].some(c=>{const b=c.getBoundingClientRect();return b.left<label.right&&b.right>label.left&&b.top<label.bottom&&b.bottom>label.top});out.push({tier:t.dataset.tier,spansZone:z.width-r.width<20,labelCovered:covered,cards:t.querySelectorAll('.card').length})}return JSON.stringify(out)})()`));
+  check('each row spans the whole battlefield, and no card sits over its label', tierFit.every((t) => t.spansZone && !t.labelCovered), JSON.stringify(tierFit));
   await click(`.card[data-uid="${forestUid}"] img`); await sleep(100);
   check('a land taps like any permanent', (await zone('me', 'battlefield')).find((c) => c.name === 'Forest').tapped);
   await shot('8-lands');

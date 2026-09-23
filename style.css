@@ -215,6 +215,9 @@ h3 { font-size: 0.68rem; }
 .battlefield {
   flex-direction: column;
   flex-wrap: nowrap;
+  /* The zone aligns its items to the start, which in a column means each
+     row shrinks to its cards and its label ends up under them. */
+  align-items: stretch;
   gap: 0.35rem;
   padding: 0.35rem;
 }

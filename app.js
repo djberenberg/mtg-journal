@@ -73,13 +73,13 @@ function show(opp) {
 const cardEls = new Map();
 
 const ACTIONS = {
-  hand: [['play', 'play'], ['move', 'graveyard', 'grave'], ['move', 'exile', 'exile'], ['move', 'command', 'cmd'], ['remove', '×']],
-  battlefield: [['counter', 'ctr'], ['move', 'graveyard', 'grave'], ['move', 'exile', 'exile'], ['move', 'hand', 'hand'], ['move', 'command', 'cmd'], ['remove', '×']],
-  graveyard: [['move', 'battlefield', 'field'], ['move', 'hand', 'hand'], ['move', 'exile', 'exile'], ['move', 'command', 'cmd'], ['remove', '×']],
-  exile: [['counter', 'ctr'], ['move', 'battlefield', 'field'], ['move', 'hand', 'hand'], ['move', 'graveyard', 'grave'], ['move', 'command', 'cmd'], ['remove', '×']],
-  command: [['counter', 'ctr'], ['move', 'battlefield', 'field'], ['move', 'hand', 'hand'], ['move', 'graveyard', 'grave'], ['remove', '×']],
+  hand: [['play', 'play'], ['copy', 'copy'], ['move', 'graveyard', 'grave'], ['move', 'exile', 'exile'], ['move', 'command', 'cmd'], ['remove', '×']],
+  battlefield: [['counter', 'ctr'], ['copy', 'copy'], ['move', 'graveyard', 'grave'], ['move', 'exile', 'exile'], ['move', 'hand', 'hand'], ['move', 'command', 'cmd'], ['remove', '×']],
+  graveyard: [['copy', 'copy'], ['move', 'battlefield', 'field'], ['move', 'hand', 'hand'], ['move', 'exile', 'exile'], ['move', 'command', 'cmd'], ['remove', '×']],
+  exile: [['counter', 'ctr'], ['copy', 'copy'], ['move', 'battlefield', 'field'], ['move', 'hand', 'hand'], ['move', 'graveyard', 'grave'], ['move', 'command', 'cmd'], ['remove', '×']],
+  command: [['counter', 'ctr'], ['copy', 'copy'], ['move', 'battlefield', 'field'], ['move', 'hand', 'hand'], ['move', 'graveyard', 'grave'], ['remove', '×']],
 };
-const ACTION_TITLE = { play: 'play', remove: 'remove (a mistake)', counter: 'add a counter' };
+const ACTION_TITLE = { play: 'play', remove: 'remove (a mistake)', counter: 'add a counter', copy: 'another of this card, beside it' };
 const ZONE_TITLE = { battlefield: 'to the battlefield', hand: 'to hand', graveyard: 'to the graveyard', exile: 'to exile', command: 'to the command zone' };
 
 function describe(c) {
@@ -430,6 +430,7 @@ document.querySelector('.table').addEventListener('click', (e) => {
   const uid = card.dataset.uid;
   if (btn?.dataset.act === 'counter') openPicker(card);
   else if (btn?.dataset.act === 'play') commit(G.play(game, uid));
+  else if (btn?.dataset.act === 'copy') commit(G.copyCard(game, uid));
   else if (btn?.dataset.act === 'move') commit(G.moveTo(game, uid, btn.dataset.zone));
   else if (btn?.dataset.act === 'remove') commit(G.remove(game, uid));
   else if (e.target.tagName === 'IMG' && card.dataset.zone === 'battlefield') commit(G.toggleTap(game, uid));

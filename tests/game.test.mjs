@@ -7,7 +7,7 @@ import { parseCard } from '../scryfall.js';
 import {
   newGame, addCard, play, toggleTap, moveTo, remove, nextTurn, adjustLife,
   isPermanent, cardsIn, load, players, label, setOpponents, MAX_OPPONENTS, resetGame,
-  parseCounterKind, addCounter, adjustCounter, moveCounter, isLand,
+  parseCounterKind, addCounter, adjustCounter, moveCounter, isLand, copyCard,
 } from '../game.js';
 
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url)));
@@ -423,4 +423,41 @@ test('a land is a permanent, and plays to the battlefield like one', () => {
   let g = addCard(newGame(), FOREST, 'me');
   g = play(g, only(g, 'me', 'hand').uid);
   only(g, 'me', 'battlefield');
+});
+
+// --- copies --------------------------------------------------------------
+
+test('copyCard puts another of the same card beside the original: same owner and zone, fresh', () => {
+  let g = addCard(addCard(newGame(), ELVES, 'opp1'), FOREST, 'opp1');
+  const orig = cardsIn(g, 'opp1', 'battlefield')[0];
+  g = toggleTap(addCounter(g, orig.uid, '+1/+1'), orig.uid);
+  g = copyCard(g, orig.uid);
+  const field = cardsIn(g, 'opp1', 'battlefield');
+  assert.deepEqual(field.map((c) => c.name), ['Llanowar Elves', 'Llanowar Elves', 'Forest'], 'the copy sits right after the original');
+  const copy = field[1];
+  assert.notEqual(copy.uid, orig.uid);
+  assert.equal(copy.scryfallId, orig.scryfallId);
+  assert.equal(copy.owner, 'opp1');
+  assert.equal(copy.zone, 'battlefield');
+  assert.equal(copy.tapped, false);
+  assert.deepEqual(copy.counters, []);
+  assert.equal(field[0].tapped, true, 'the original is as it was');
+  assert.equal(field[0].counters.length, 1);
+  assert.match(last(g).text, /opponent copies Llanowar Elves/);
+  assert.equal(g.nextUid, 5);
+});
+
+test('a copy of the commander is not the commander', () => {
+  let g = addCard(newGame(), ELVES, 'me', 'command');
+  g = copyCard(g, only(g, 'me', 'command').uid);
+  const [orig, copy] = cardsIn(g, 'me', 'command');
+  assert.equal(orig.commander, true);
+  assert.equal(copy.commander, undefined);
+});
+
+test('copyCard works in any zone, and ignores an unknown uid', () => {
+  let g = addCard(newGame(), BOLT, 'me');
+  g = copyCard(g, only(g, 'me', 'hand').uid);
+  assert.equal(cardsIn(g, 'me', 'hand').length, 2);
+  assert.equal(copyCard(g, 'nope'), g);
 });

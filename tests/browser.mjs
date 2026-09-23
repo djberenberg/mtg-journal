@@ -166,6 +166,23 @@ try {
   await click(`.card[data-uid="${hand[1].uid}"] button[data-act="move"][data-zone="battlefield"]`); await sleep(50);
   await shot('2-table');
 
+  // copies
+  await click(`.card[data-uid="${hand[1].uid}"] img`); await sleep(50); // tap the original first
+  await click(`.card[data-uid="${hand[1].uid}"] button[data-act="copy"]`); await sleep(100);
+  field = await zone('me', 'battlefield');
+  check('copy puts a second, untapped Llanowar Elves right after the tapped original', field.length === 2 && field.every((c) => c.name === 'Llanowar Elves') && field[0].uid === hand[1].uid && field[0].tapped && !field[1].tapped && /I copy Llanowar Elves/.test((await ui()).log[0]), JSON.stringify(field));
+  const copyUid = field[1].uid;
+  check('the copy has no commander mark, though the original does', (await el(`.card[data-uid="${copyUid}"]`, "e.classList.contains('commander')")) === false && (await el(`.card[data-uid="${hand[1].uid}"]`, "e.classList.contains('commander')")) === true);
+  await click(`.card[data-uid="${copyUid}"] img`); await sleep(50);
+  check('the copy taps on its own', (await zone('me', 'battlefield'))[1].tapped && (await zone('me', 'battlefield'))[0].tapped);
+  await click(`.card[data-uid="${theirs[0].uid}"] button[data-act="copy"]`); await sleep(100);
+  check('the opponent\'s card copies too, logged as theirs', (await zone('opp', 'battlefield')).length === 2 && /opponent copies Delver/.test((await ui()).log[0]));
+  await shot('9-copies');
+  await click(`.card[data-uid="${copyUid}"] button[data-act="remove"]`); await sleep(50);
+  await click(`.card[data-uid="${(await zone('opp', 'battlefield'))[1].uid}"] button[data-act="remove"]`); await sleep(50);
+  await click(`.card[data-uid="${hand[1].uid}"] img`); await sleep(50); // untap the original again
+  check('(copies removed, original untapped, for the checks that follow)', (await zone('me', 'battlefield')).length === 1 && (await zone('opp', 'battlefield')).length === 1 && !(await zone('me', 'battlefield'))[0].tapped);
+
   // lands have a row of their own
   await evalJs(`document.getElementById('q').focus()`);
   await type('forest'); await key('Enter', 'Enter', 13); await sleep(300);
@@ -262,7 +279,7 @@ try {
   check('+ on their square works too', (await evalJs(`document.querySelector('${delverSel} .counter .n').textContent`)) === '2');
   await click(`${delverSel} .counter button[data-ctr="-1"]`); await click(`${delverSel} .counter button[data-ctr="-1"]`); await sleep(50);
   check('(their square cleared)', (await evalJs(`document.querySelectorAll('${delverSel} .counter').length`)) === 0);
-  check('the action strip of a card that changed zone is still its own: exile shows field/hand/grave/cmd', (await evalJs(`[...document.querySelectorAll('.card[data-uid="${hand[1].uid}"] .actions button')].map(b=>b.textContent).join(' ')`)) === 'ctr grave exile hand cmd ×');
+  check('the action strip of a card that changed zone is still its own: exile shows field/hand/grave/cmd', (await evalJs(`[...document.querySelectorAll('.card[data-uid="${hand[1].uid}"] .actions button')].map(b=>b.textContent).join(' ')`)) === 'ctr copy grave exile hand cmd ×');
 
   // undo, persistence, unknown card
   const before = JSON.stringify(await state());

@@ -146,6 +146,20 @@ export function remove(state, uid) {
   return say({ ...state, cards: state.cards.filter((x) => x.uid !== uid) }, `${who(state, c.owner, 'remove')} ${c.name}`);
 }
 
+// Another of the same card, right beside the original: a token copy, a
+// clone, a second Forest. Same owner and zone; untapped, no counters, and
+// not the commander even if the original is.
+export function copyCard(state, uid) {
+  const i = state.cards.findIndex((c) => c.uid === uid);
+  if (i < 0) return state;
+  const orig = state.cards[i];
+  const { commander, ...rest } = orig;
+  const copy = { ...rest, uid: String(state.nextUid), tapped: false, counters: [] };
+  const cards = [...state.cards.slice(0, i + 1), copy, ...state.cards.slice(i + 1)];
+  const verb = orig.owner === 'me' ? 'I copy' : `${label(state, orig.owner)} copies`;
+  return say({ ...state, cards, nextUid: state.nextUid + 1 }, `${verb} ${orig.name}`);
+}
+
 // The turn passes round the table. The player whose turn begins untaps;
 // everyone else's permanents stay as they are.
 export function nextTurn(state) {

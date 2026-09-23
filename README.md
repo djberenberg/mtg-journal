@@ -57,7 +57,9 @@ runs offline; screenshots land in `.scratch/`.
   battlefield, or their graveyard if it is an instant or sorcery.
 - Hover a card for its cost, type, and text. Hover also shows what can be
   done with it: play (from hand), or send it to the graveyard, exile, hand,
-  battlefield, or command zone. `×` removes it outright, for a mistake.
+  battlefield, or command zone. `copy` puts another of the same card
+  beside it, for tokens, clones, and a second Forest. `×` removes it
+  outright, for a mistake.
 - **ctr** on a card's hover strip adds a counter: `+1/+1` by default, any
   `+N/+M`, or a name such as `lore` or `time`. Each kind is a small square
   on the card showing how many; hover it for + and −, and drag it anywhere

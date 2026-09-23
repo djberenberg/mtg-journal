@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { parseCard } from '../scryfall.js';
 import {
   newGame, addCard, play, toggleTap, moveTo, remove, nextTurn, adjustLife,
-  isPermanent, cardsIn, load, players, label, setOpponents, MAX_OPPONENTS,
+  isPermanent, cardsIn, load, players, label, setOpponents, MAX_OPPONENTS, resetGame,
 } from '../game.js';
 
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url)));
@@ -293,4 +293,18 @@ test('a card can be added straight to the command zone', () => {
 test('a commander in the command zone is not tappable', () => {
   const g = addCard(newGame(), ELVES, 'me', 'command');
   assert.equal(toggleTap(g, only(g, 'me', 'command').uid), g);
+});
+
+test('resetGame starts over with the same seats and starting life', () => {
+  let g = newGame({ opponents: 3, life: 40 });
+  g = addCard(nextTurn(adjustLife(g, 'opp2', -9)), ELVES, 'opp1');
+  const r = resetGame(g);
+  assert.equal(r.turn, 1);
+  assert.equal(r.active, 'me');
+  assert.equal(r.opponents, 3);
+  assert.deepEqual(r.life, { me: 40, opp1: 40, opp2: 40, opp3: 40 });
+  assert.deepEqual(r.cards, []);
+  assert.equal(r.log.length, 1);
+  assert.match(last(r).text, /game reset: 3 opponents, 40 life/);
+  assert.equal(r.nextUid, 1);
 });

@@ -69,6 +69,12 @@ export function newGame({ opponents = 1, life = 20 } = {}) {
   }, `new game: ${n} opponent${n === 1 ? '' : 's'}, ${life} life`);
 }
 
+// Start over at the same table: the same seats, the same starting life.
+export function resetGame(state) {
+  const fresh = newGame({ opponents: state.opponents, life: state.startingLife });
+  return { ...fresh, log: [{ turn: 1, text: fresh.log[0].text.replace('new game', 'game reset') }] };
+}
+
 // Seat or unseat opponents mid-game. An opponent with cards on the table
 // cannot be unseated; clear their cards first. New seats start at the
 // game's starting life; if the unseated opponent's turn was in progress,

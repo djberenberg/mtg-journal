@@ -14,7 +14,9 @@ python3 -m http.server -d . 8000    # http://localhost:8000/
 ## Using it
 
 - **new game** asks how many opponents (one to three, as in commander) and
-  the starting life (20 or 40). With more than one opponent, tabs above the
+  the starting life (20 or 40). **reset game** clears the table and starts
+  over with the same seats and life, in one click; undo brings the game
+  back if it was a slip. With more than one opponent, tabs above the
   opponent's board switch between them; each tab shows that opponent's
   life. Everything on the opponent's side of the table, and the
   **opponent plays** button, refers to the opponent in view.

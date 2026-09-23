@@ -218,6 +218,16 @@ try {
   check('opponent 3 untapped at the start of their turn', !(await zone('opp', 'battlefield'))[0].tapped);
   check('the log marks turn lines', (await evalJs(`document.querySelectorAll('#log li.turn-line').length`)) === 4);
 
+  // reset: same table, cleared
+  const beforeReset = await state();
+  await click('#reset'); await sleep(100); u = await ui(); o = await oppUi();
+  check('reset clears the table and starts over with the same three opponents at 40', (await state()).cards.length === 0 && u.turn === 'turn 1 · my turn' && u.me === '40' && u.opp === '40' && o.tabs.length === 3 && o.tabs.every((t) => /40$/.test(t.text)) && o.tabs[0].selected && u.log.length === 1 && /game reset: 3 opponents, 40 life/.test(u.log[0]) && (await evalJs(`document.querySelectorAll('.card').length`)) === 0, JSON.stringify({ turn: u.turn, log: u.log, tabs: o.tabs.map((t) => t.text) }));
+  check('the status line says undo brings it back', /undo/.test(u.status) && !u.error, u.status);
+  await click('#undo'); await sleep(100); u = await ui();
+  check('and undo does: the cards, the turn, and the life are back', JSON.stringify(await state()) === JSON.stringify(beforeReset) && u.turn === 'turn 5 · my turn' && (await state()).cards.length === 2, JSON.stringify({ turn: u.turn }));
+  await click('#opp-tabs button[data-opp="opp3"]'); await sleep(50);
+  check('the view is not part of undo: it stays on opponent 1, and opponent 3\'s card is still there when you look', (await zone('opp', 'battlefield')).length === 1);
+
   // a save from before there were several opponents
   const old = { turn: 3, active: 'opp', life: { me: 18, opp: 12 }, cards: [{ ...parseFixture('elves'), uid: '1', owner: 'opp', zone: 'battlefield', tapped: true }], log: [{ turn: 1, text: 'new game' }], nextUid: 2 };
   await evalJs(`localStorage.setItem('mtg-journal.game', ${JSON.stringify(JSON.stringify(old))})`);

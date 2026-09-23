@@ -329,6 +329,15 @@ $('new').addEventListener('click', () => {
   dialog.showModal();
 });
 
+// Reset keeps the seats and the starting life; new game asks for them
+// again. Neither needs a confirmation on top: undo brings the game back.
+$('reset').addEventListener('click', () => {
+  commit(G.resetGame(game));
+  show('opp1');
+  setStatus('game reset (undo brings it back)');
+  q.focus();
+});
+
 $('new-cancel').addEventListener('click', () => dialog.close());
 
 $('new-form').addEventListener('submit', (e) => {

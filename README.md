@@ -27,6 +27,10 @@ python3 -m http.server -d . 8000    # http://localhost:8000/
 - Hover a card for its cost, type, and text. Hover also shows what can be
   done with it: play (from hand), or send it to the graveyard, exile, hand,
   battlefield, or command zone. `×` removes it outright, for a mistake.
+- **ctr** on a card's hover strip adds a counter: `+1/+1` by default, any
+  `+N/+M`, or a name such as `lore` or `time`. Each kind is a small square
+  on the card showing how many; hover it for + and −, and drag it anywhere
+  on the card. Counters come off when the card changes zone.
 - Each player has a **command zone**. A card that has been there wears a
   `cmd` mark wherever it goes, so the commander can be told from the rest
   on the battlefield.
@@ -58,7 +62,7 @@ autocomplete is debounced to 200ms for that reason.
 
 ## Not yet
 
-Phases and the stack, counters, tokens, attacking and blocking, commander
+Phases and the stack, tokens, attacking and blocking, commander
 damage, naming the opponents, flipping a double-faced card (the back image
 is already kept), and the opponent's library and hand sizes. The rules
 module is where each of those would go.

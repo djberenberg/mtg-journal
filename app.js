@@ -71,11 +71,12 @@ const cardEls = new Map();
 
 const ACTIONS = {
   hand: [['play', 'play'], ['move', 'graveyard', 'grave'], ['move', 'exile', 'exile'], ['move', 'command', 'cmd'], ['remove', '×']],
-  battlefield: [['move', 'graveyard', 'grave'], ['move', 'exile', 'exile'], ['move', 'hand', 'hand'], ['move', 'command', 'cmd'], ['remove', '×']],
+  battlefield: [['counter', 'ctr'], ['move', 'graveyard', 'grave'], ['move', 'exile', 'exile'], ['move', 'hand', 'hand'], ['move', 'command', 'cmd'], ['remove', '×']],
   graveyard: [['move', 'battlefield', 'field'], ['move', 'hand', 'hand'], ['move', 'exile', 'exile'], ['move', 'command', 'cmd'], ['remove', '×']],
-  exile: [['move', 'battlefield', 'field'], ['move', 'hand', 'hand'], ['move', 'graveyard', 'grave'], ['move', 'command', 'cmd'], ['remove', '×']],
-  command: [['move', 'battlefield', 'field'], ['move', 'hand', 'hand'], ['move', 'graveyard', 'grave'], ['remove', '×']],
+  exile: [['counter', 'ctr'], ['move', 'battlefield', 'field'], ['move', 'hand', 'hand'], ['move', 'graveyard', 'grave'], ['move', 'command', 'cmd'], ['remove', '×']],
+  command: [['counter', 'ctr'], ['move', 'battlefield', 'field'], ['move', 'hand', 'hand'], ['move', 'graveyard', 'grave'], ['remove', '×']],
 };
+const ACTION_TITLE = { play: 'play', remove: 'remove (a mistake)', counter: 'add a counter' };
 const ZONE_TITLE = { battlefield: 'to the battlefield', hand: 'to hand', graveyard: 'to the graveyard', exile: 'to exile', command: 'to the command zone' };
 
 function describe(c) {
@@ -98,10 +99,14 @@ function cardEl(c) {
     img.alt = c.name;
     img.draggable = false;
     img.loading = 'lazy';
-    el.append(img, document.createElement('figcaption'));
-    el.lastChild.className = 'actions';
+    const layer = document.createElement('div');
+    layer.className = 'counters';
+    const actions = document.createElement('figcaption');
+    actions.className = 'actions';
+    el.append(img, layer, actions);
     cardEls.set(c.uid, el);
   }
+  renderCounters(el.querySelector('.counters'), c.counters ?? []);
   el.classList.toggle('tapped', c.tapped);
   el.classList.toggle('permanent', G.isPermanent(c));
   el.classList.toggle('commander', Boolean(c.commander));
@@ -112,11 +117,39 @@ function cardEl(c) {
       btn.type = 'button';
       btn.dataset.act = act;
       if (act === 'move') { btn.dataset.zone = a; btn.textContent = b; btn.title = ZONE_TITLE[a]; }
-      else { btn.textContent = a; btn.title = act === 'remove' ? 'remove (a mistake)' : 'play'; }
+      else { btn.textContent = a; btn.title = ACTION_TITLE[act]; }
       return btn;
     }));
   }
   return el;
+}
+
+// The squares on one card, kept by id like the cards themselves. A square
+// being dragged is left alone: its position is the pointer's until it is
+// let go and the move is committed.
+function renderCounters(layer, counters) {
+  const seen = new Set();
+  for (const k of counters) {
+    seen.add(k.id);
+    let sq = layer.querySelector(`[data-cid="${k.id}"]`);
+    if (!sq) {
+      sq = document.createElement('div');
+      sq.className = 'counter';
+      sq.dataset.cid = k.id;
+      sq.innerHTML = '<span class="n"></span><span class="k"></span><span class="adj"><button type="button" data-ctr="-1" aria-label="One fewer">−</button><button type="button" data-ctr="1" aria-label="One more">+</button></span>';
+      layer.appendChild(sq);
+    }
+    sq.querySelector('.n').textContent = k.count;
+    sq.querySelector('.k').textContent = k.kind;
+    sq.title = `${k.count} ${k.kind} counter${k.count === 1 ? '' : 's'}: drag to move, hover for + and −`;
+    if (drag?.sq !== sq) {
+      sq.style.setProperty('--x', k.x);
+      sq.style.setProperty('--y', k.y);
+      sq.style.left = '';
+      sq.style.top = '';
+    }
+  }
+  for (const sq of [...layer.children]) if (!seen.has(sq.dataset.cid)) sq.remove();
 }
 
 // The section for the opponent in view: their tabs, name, and life.
@@ -292,8 +325,94 @@ q.addEventListener('blur', () => setTimeout(closeSuggestions, 100));
 
 // --- the table --------------------------------------------------------
 
+// --- counters ---------------------------------------------------------
+
+const pick = $('ctr-pick');
+const pickKind = $('ctr-kind');
+
+// The picker moves onto the card that asked for it, so it is placed by
+// the card's own box and goes with it.
+function openPicker(card) {
+  card.appendChild(pick);
+  pick.dataset.uid = card.dataset.uid;
+  pick.hidden = false;
+  pickKind.value = '+1/+1';
+  pickKind.focus();
+  pickKind.select();
+}
+
+function closePicker() {
+  pick.hidden = true;
+  delete pick.dataset.uid;
+}
+
+pick.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const uid = pick.dataset.uid;
+  const c = game.cards.find((x) => x.uid === uid);
+  if (!c) return closePicker();
+  // A new kind's square goes below the last, down the left edge.
+  const n = (c.counters ?? []).filter((k) => k.kind !== G.parseCounterKind(pickKind.value)).length;
+  commit(G.addCounter(game, uid, pickKind.value, { x: 0.06, y: Math.min(0.72, 0.06 + 0.22 * n) }));
+  closePicker();
+});
+
+pickKind.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePicker(); });
+pickKind.addEventListener('blur', () => setTimeout(() => { if (!pick.contains(document.activeElement)) closePicker(); }, 120));
+
+// Dragging a square about its card. Position is set in pixels while the
+// pointer is down and committed, when it is let go, as a fraction of the
+// room the square has to move in; so it keeps its place on the card when
+// the card changes size or turns on its side, and never pokes out.
+let drag = null;
+
+document.querySelector('.table').addEventListener('pointerdown', (e) => {
+  const sq = e.target.closest('.counter');
+  if (!sq || e.target.closest('button') || e.button !== 0) return;
+  const layer = sq.parentElement;
+  drag = { sq, layer, uid: sq.closest('.card').dataset.uid, startX: e.clientX, startY: e.clientY, left: sq.offsetLeft, top: sq.offsetTop, moved: false };
+  sq.setPointerCapture?.(e.pointerId);
+  e.preventDefault();
+});
+
+document.querySelector('.table').addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  const dx = e.clientX - drag.startX;
+  const dy = e.clientY - drag.startY;
+  if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 3) return;
+  drag.moved = true;
+  drag.sq.classList.add('dragging');
+  const maxX = drag.layer.clientWidth - drag.sq.offsetWidth;
+  const maxY = drag.layer.clientHeight - drag.sq.offsetHeight;
+  drag.sq.style.left = `${Math.max(0, Math.min(maxX, drag.left + dx))}px`;
+  drag.sq.style.top = `${Math.max(0, Math.min(maxY, drag.top + dy))}px`;
+});
+
+function endDrag() {
+  if (!drag) return;
+  const { sq, layer, uid, moved } = drag;
+  drag = null;
+  sq.classList.remove('dragging');
+  if (!moved) return;
+  const roomX = layer.clientWidth - sq.offsetWidth;
+  const roomY = layer.clientHeight - sq.offsetHeight;
+  commit(G.moveCounter(game, uid, sq.dataset.cid, roomX > 0 ? sq.offsetLeft / roomX : 0, roomY > 0 ? sq.offsetTop / roomY : 0));
+  render(); // the commit may be a no-op (same place); put the fractions back either way
+}
+
+document.querySelector('.table').addEventListener('pointerup', endDrag);
+document.querySelector('.table').addEventListener('pointercancel', endDrag);
+
+// --- the table --------------------------------------------------------
+
 document.querySelector('.table').addEventListener('click', (e) => {
+  if (e.target.closest('.ctr-pick')) return;
   const btn = e.target.closest('button');
+  if (btn?.dataset.ctr) {
+    const sq = btn.closest('.counter');
+    commit(G.adjustCounter(game, sq.closest('.card').dataset.uid, sq.dataset.cid, Number(btn.dataset.ctr)));
+    return;
+  }
   if (btn?.dataset.opp) { show(btn.dataset.opp); return; }
   if (btn?.dataset.life) {
     commit(G.adjustLife(game, btn.dataset.life === 'me' ? 'me' : view.opp, Number(btn.dataset.by)));
@@ -302,7 +421,8 @@ document.querySelector('.table').addEventListener('click', (e) => {
   const card = e.target.closest('.card');
   if (!card) return;
   const uid = card.dataset.uid;
-  if (btn?.dataset.act === 'play') commit(G.play(game, uid));
+  if (btn?.dataset.act === 'counter') openPicker(card);
+  else if (btn?.dataset.act === 'play') commit(G.play(game, uid));
   else if (btn?.dataset.act === 'move') commit(G.moveTo(game, uid, btn.dataset.zone));
   else if (btn?.dataset.act === 'remove') commit(G.remove(game, uid));
   else if (e.target.tagName === 'IMG' && card.dataset.zone === 'battlefield') commit(G.toggleTap(game, uid));

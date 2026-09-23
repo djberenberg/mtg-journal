@@ -79,6 +79,12 @@
     <ol id="log" reversed aria-label="Log"></ol>
   </aside>
 
+  <!-- Moved onto whichever card asked for a counter; one for the page. -->
+  <form class="ctr-pick" id="ctr-pick" hidden>
+    <input id="ctr-kind" type="text" value="+1/+1" maxlength="16" aria-label="Counter: +N/+M, or a name such as lore" spellcheck="false">
+    <button type="submit" class="primary">add</button>
+  </form>
+
   <dialog id="new-dialog" aria-labelledby="new-title">
     <form id="new-form">
       <h2 id="new-title">new game</h2>

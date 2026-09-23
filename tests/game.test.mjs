@@ -7,6 +7,7 @@ import { parseCard } from '../scryfall.js';
 import {
   newGame, addCard, play, toggleTap, moveTo, remove, nextTurn, adjustLife,
   isPermanent, cardsIn, load, players, label, setOpponents, MAX_OPPONENTS, resetGame,
+  parseCounterKind, addCounter, adjustCounter, moveCounter,
 } from '../game.js';
 
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url)));
@@ -307,4 +308,97 @@ test('resetGame starts over with the same seats and starting life', () => {
   assert.equal(r.log.length, 1);
   assert.match(last(r).text, /game reset: 3 opponents, 40 life/);
   assert.equal(r.nextUid, 1);
+});
+
+// --- counters ------------------------------------------------------------
+
+const onField = () => { const g = addCard(newGame(), ELVES, 'opp1'); return [g, only(g, 'opp1', 'battlefield').uid]; };
+const ctrs = (g, uid) => g.cards.find((c) => c.uid === uid).counters;
+
+test('parseCounterKind: N/M with signs made explicit; anything else is a custom word', () => {
+  assert.equal(parseCounterKind('+1/+1'), '+1/+1');
+  assert.equal(parseCounterKind('1/1'), '+1/+1');
+  assert.equal(parseCounterKind('-1/-1'), '-1/-1');
+  assert.equal(parseCounterKind(' +2 / +0 '), '+2/+0');
+  assert.equal(parseCounterKind('Lore'), 'lore');
+  assert.equal(parseCounterKind('time'), 'time');
+  assert.equal(parseCounterKind(''), null);
+  assert.equal(parseCounterKind('   '), null);
+  assert.equal(parseCounterKind('a'.repeat(17)), null, 'too long for a square');
+  assert.equal(parseCounterKind(undefined), null);
+});
+
+test('addCounter puts one counter of a kind on a card, at a place on it', () => {
+  const [g0, uid] = onField();
+  const g = addCounter(g0, uid, '+1/+1', { x: 0.2, y: 0.3 });
+  const [k] = ctrs(g, uid);
+  assert.equal(k.kind, '+1/+1');
+  assert.equal(k.count, 1);
+  assert.deepEqual([k.x, k.y], [0.2, 0.3]);
+  assert.equal(typeof k.id, 'string');
+  assert.match(last(g).text, /opponent puts a \+1\/\+1 counter on Llanowar Elves \(1\)/);
+});
+
+test('another of the same kind stacks onto the same square; a different kind is its own square', () => {
+  const [g0, uid] = onField();
+  let g = addCounter(addCounter(g0, uid, '+1/+1'), uid, '1/1');
+  assert.equal(ctrs(g, uid).length, 1);
+  assert.equal(ctrs(g, uid)[0].count, 2);
+  assert.match(last(g).text, /\(2\)/);
+  g = addCounter(g, uid, 'lore');
+  assert.equal(ctrs(g, uid).length, 2);
+  assert.notEqual(ctrs(g, uid)[0].id, ctrs(g, uid)[1].id);
+  assert.match(last(g).text, /puts a lore counter on/);
+});
+
+test('addCounter ignores a bad kind, an unknown card, and a card in hand keeps none by default', () => {
+  const [g, uid] = onField();
+  assert.equal(addCounter(g, uid, ''), g);
+  assert.equal(addCounter(g, 'nope', '+1/+1'), g);
+  assert.equal(only(addCard(newGame(), ELVES, 'me'), 'me', 'hand').counters, undefined);
+});
+
+test('adjustCounter adds or removes one; at zero the square goes', () => {
+  const [g0, uid] = onField();
+  let g = addCounter(g0, uid, 'lore');
+  const id = ctrs(g, uid)[0].id;
+  g = adjustCounter(g, uid, id, 1);
+  assert.equal(ctrs(g, uid)[0].count, 2);
+  assert.match(last(g).text, /puts a lore counter on Llanowar Elves \(2\)/);
+  g = adjustCounter(g, uid, id, -1);
+  assert.match(last(g).text, /removes a lore counter from Llanowar Elves \(1\)/);
+  g = adjustCounter(g, uid, id, -1);
+  assert.deepEqual(ctrs(g, uid), []);
+  assert.match(last(g).text, /\(0\)/);
+  assert.equal(adjustCounter(g, uid, id, 1), g, 'gone: nothing to adjust');
+  assert.equal(adjustCounter(g, uid, 'x', 0), g);
+});
+
+test('moveCounter keeps the square on the card, and is not worth a log line', () => {
+  const [g0, uid] = onField();
+  let g = addCounter(g0, uid, '+1/+1');
+  const id = ctrs(g, uid)[0].id;
+  const n = g.log.length;
+  g = moveCounter(g, uid, id, 0.7, 0.9);
+  assert.deepEqual([ctrs(g, uid)[0].x, ctrs(g, uid)[0].y], [0.7, 0.9]);
+  g = moveCounter(g, uid, id, -3, 4);
+  assert.deepEqual([ctrs(g, uid)[0].x, ctrs(g, uid)[0].y], [0, 1]);
+  assert.equal(g.log.length, n);
+  assert.equal(moveCounter(g, uid, 'x', 0.5, 0.5), g);
+});
+
+test('counters come off when the card leaves its zone', () => {
+  const [g0, uid] = onField();
+  let g = addCounter(g0, uid, '+1/+1');
+  g = moveTo(g, uid, 'graveyard');
+  assert.deepEqual(ctrs(g, uid), []);
+  g = moveTo(g, uid, 'battlefield');
+  g = addCounter(g, uid, 'time');
+  assert.equal(nextTurn(g).cards[0].counters.length, 1, 'but a turn passing leaves them');
+});
+
+test('a game with counters survives a save and load', () => {
+  const [g0, uid] = onField();
+  const g = addCounter(g0, uid, 'lore', { x: 0.1, y: 0.2 });
+  assert.deepEqual(load(JSON.stringify(g)), g);
 });

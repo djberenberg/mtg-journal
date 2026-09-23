@@ -49,6 +49,7 @@ try {
   const evalJs = async (expression) => (await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })).result.result.value;
   const key = async (k, code, vk, mods = 0) => { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: k, code, windowsVirtualKeyCode: vk, modifiers: mods, text: type === 'keyDown' ? (k === 'Enter' ? '\r' : k.length === 1 ? k : undefined) : undefined }); };
   const type = async (s) => { for (const ch of s) await send('Input.insertText', { text: ch }); };
+  const mouse = (type, x, y, buttons = 1) => send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons, clickCount: 1 });
   const click = (sel) => evalJs(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});if(!e)return 'missing';e.click();return 'ok'})()`);
   const shot = async (name) => writeFileSync(join(out, `${name}.png`), Buffer.from((await send('Page.captureScreenshot')).result.data, 'base64'));
   const results = []; const check = (name, ok, detail = '') => { results.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name} ${detail}`); };
@@ -165,11 +166,75 @@ try {
   await click(`.card[data-uid="${hand[1].uid}"] button[data-act="move"][data-zone="battlefield"]`); await sleep(50);
   await shot('2-table');
 
+  // counters
+  const elvesSel = `.card[data-uid="${hand[1].uid}"]`;
+  const squares = () => evalJs(`[...document.querySelectorAll('${elvesSel} .counter')].map(s=>({n:s.querySelector('.n').textContent,k:s.querySelector('.k').textContent,cid:s.dataset.cid,left:parseFloat(s.style.getPropertyValue('--x')),top:parseFloat(s.style.getPropertyValue('--y'))}))`);
+  const counterState = async () => (await state()).cards.find((c) => c.uid === hand[1].uid).counters;
+  await click(`${elvesSel} button[data-act="counter"]`); await sleep(80);
+  check('ctr opens a picker on the card, prefilled +1/+1 and focused', !(await el('#ctr-pick', 'e.hidden')) && (await el('#ctr-pick', "e.closest('.card')?.dataset.uid")) === hand[1].uid && (await el('#ctr-kind', 'e.value')) === '+1/+1' && (await evalJs('document.activeElement.id')) === 'ctr-kind');
+  await key('Enter', 'Enter', 13); await sleep(80);
+  let sq = await squares();
+  check('enter adds a +1/+1 counter: one square, showing 1 and its kind; picker closes; logged', sq.length === 1 && sq[0].n === '1' && sq[0].k === '+1/+1' && (await el('#ctr-pick', 'e.hidden')) && /I put a \+1\/\+1 counter on Llanowar Elves \(1\)/.test((await ui()).log[0]), JSON.stringify(sq));
+  await click(`${elvesSel} button[data-act="counter"]`); await sleep(50); await key('Enter', 'Enter', 13); await sleep(80); sq = await squares();
+  check('a second +1/+1 stacks onto the same square: 2', sq.length === 1 && sq[0].n === '2', JSON.stringify(sq));
+  await click(`${elvesSel} button[data-act="counter"]`); await sleep(50);
+  await evalJs(`document.getElementById('ctr-kind').value=''`); await type('lore'); await key('Enter', 'Enter', 13); await sleep(80); sq = await squares();
+  check('a custom kind is its own square, below the first', sq.length === 2 && sq[1].k === 'lore' && sq[1].n === '1' && sq[1].top > sq[0].top && /I put a lore counter on/.test((await ui()).log[0]), JSON.stringify(sq));
+  const sqBox = await evalJs(`(()=>{const s=document.querySelector('${elvesSel} .counter');const r=s.getBoundingClientRect();const c=document.querySelector('${elvesSel}').getBoundingClientRect();const st=getComputedStyle(s);return {w:r.width,h:r.height,inside:r.left>=c.left&&r.right<=c.right&&r.top>=c.top&&r.bottom<=c.bottom,alpha:parseFloat((st.backgroundColor.match(/[\\d.]+\\)$/)||['1'])[0])}})()`);
+  check('a square is small, translucent, and inside the card', sqBox.w < 40 && Math.abs(sqBox.w - sqBox.h) < 1 && sqBox.inside && sqBox.alpha < 0.8, JSON.stringify(sqBox));
+  await shot('6-counters');
+
+  // + and − on hover
+  const c0 = JSON.parse(await evalJs(`(()=>{const r=document.querySelector('${elvesSel} .counter[data-cid="${sq[0].cid}"]').getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2})})()`));
+  await mouse('mouseMoved', c0.x, c0.y, 0); await sleep(80);
+  check('hovering a square shows + and −', (await evalJs(`getComputedStyle(document.querySelector('${elvesSel} .counter[data-cid="${sq[0].cid}"] .adj')).display`)) === 'flex');
+  await click(`${elvesSel} .counter[data-cid="${sq[0].cid}"] button[data-ctr="1"]`); await sleep(50); sq = await squares();
+  check('+ makes it 3', sq[0].n === '3' && /\(3\)/.test((await ui()).log[0]));
+  for (let i = 0; i < 3; i++) { await click(`${elvesSel} .counter[data-cid="${sq[0].cid}"] button[data-ctr="-1"]`); await sleep(30); }
+  sq = await squares();
+  check('− three times removes the square; lore stays', sq.length === 1 && sq[0].k === 'lore' && /I remove a \+1\/\+1 counter from Llanowar Elves \(0\)/.test((await ui()).log[0]), JSON.stringify(sq));
+  check('the card was not tapped by any of that', !(await zone('me', 'battlefield'))[0].tapped);
+
+  // dragging
+  const cardBox = JSON.parse(await evalJs(`JSON.stringify(document.querySelector('${elvesSel}').getBoundingClientRect())`));
+  let p0 = JSON.parse(await evalJs(`(()=>{const r=document.querySelector('${elvesSel} .counter').getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2,w:r.width,h:r.height})})()`));
+  await mouse('mousePressed', p0.x, p0.y);
+  for (let i = 1; i <= 8; i++) await mouse('mouseMoved', p0.x + 5 * i, p0.y + 8 * i);
+  const during = JSON.parse(await evalJs(`(()=>{const s=document.querySelector('${elvesSel} .counter');return JSON.stringify({dragging:s.classList.contains('dragging'),left:s.style.left})})()`));
+  await mouse('mouseReleased', p0.x + 40, p0.y + 64, 0); await sleep(80);
+  let p1 = JSON.parse(await evalJs(`(()=>{const r=document.querySelector('${elvesSel} .counter').getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2})})()`));
+  let ks = await counterState();
+  check('a square drags with the pointer and is committed where it was let go', during.dragging && during.left.endsWith('px') && Math.abs(p1.x - (p0.x + 40)) <= 1 && Math.abs(p1.y - (p0.y + 64)) <= 1 && ks[0].x > 0.1 && ks[0].y > 0.2, JSON.stringify({ during, from: p0, to: p1, saved: [ks[0].x, ks[0].y] }));
+  check('after the drop the square is placed by its fractions again, not pixels', (await evalJs(`(()=>{const s=document.querySelector('${elvesSel} .counter');return s.style.left===''&&s.style.getPropertyValue('--x')!==''})()`)));
+  check('dragging did not tap the card', !(await zone('me', 'battlefield'))[0].tapped);
+  await mouse('mousePressed', p1.x, p1.y);
+  for (let i = 1; i <= 6; i++) await mouse('mouseMoved', p1.x + 80 * i, p1.y + 80 * i);
+  await mouse('mouseReleased', p1.x + 480, p1.y + 480, 0); await sleep(80);
+  const far = JSON.parse(await evalJs(`(()=>{const r=document.querySelector('${elvesSel} .counter').getBoundingClientRect();const c=document.querySelector('${elvesSel}').getBoundingClientRect();return JSON.stringify({inside:r.left>=c.left-0.5&&r.right<=c.right+0.5&&r.top>=c.top-0.5&&r.bottom<=c.bottom+0.5,corner:Math.abs(r.right-c.right)<1&&Math.abs(r.bottom-c.bottom)<1})})()`));
+  check('dragged far off the card, the square stops at its corner', far.inside && far.corner, JSON.stringify(far));
+  ks = await counterState();
+  check('the saved place is the far corner exactly: 1, 1', ks[0].x === 1 && ks[0].y === 1, JSON.stringify(ks[0]));
+
+  // tapped: still on the card
+  await click(`${elvesSel} img`); await sleep(200);
+  const onTapped = JSON.parse(await evalJs(`(()=>{const r=document.querySelector('${elvesSel} .counter').getBoundingClientRect();const c=document.querySelector('${elvesSel}').getBoundingClientRect();return JSON.stringify({inside:r.left>=c.left-0.5&&r.right<=c.right+0.5&&r.top>=c.top-0.5&&r.bottom<=c.bottom+0.5,corner:Math.abs(r.right-c.right)<1&&Math.abs(r.bottom-c.bottom)<1,box:[Math.round(c.width),Math.round(c.height)]})})()`));
+  check('on a tapped card the square is still inside the box, still at its corner', onTapped.inside && onTapped.corner && onTapped.box[0] > onTapped.box[1], JSON.stringify(onTapped));
+  await shot('7-counter-tapped');
+  await click(`${elvesSel} img`); await sleep(200);
+
+  // leaving the zone clears them; undo restores them
+  await click(`${elvesSel} button[data-act="move"][data-zone="graveyard"]`); await sleep(50);
+  check('sent to the graveyard, the card loses its counters', (await counterState()).length === 0 && (await squares()).length === 0);
+  await click('#undo'); await sleep(50);
+  check('undo brings the card and its lore counter back', (await zone('me', 'battlefield')).length === 1 && (await squares()).length === 1 && (await squares())[0].k === 'lore');
+  await click(`${elvesSel} .counter button[data-ctr="-1"]`); await sleep(50);
+  check('(cleared for the checks that follow)', (await squares()).length === 0);
+
   // undo, persistence, unknown card
   const before = JSON.stringify(await state());
   await click('#undo'); await sleep(50);
-  check('undo puts the commander back in the command zone', (await zone('me', 'command')).length === 1);
-  await click(`.card[data-uid="${hand[1].uid}"] button[data-act="move"][data-zone="battlefield"]`); await sleep(50);
+  check('undo brings back the counter just removed', (await squares()).length === 1 && (await squares())[0].k === 'lore');
+  await click(`${elvesSel} .counter button[data-ctr="-1"]`); await sleep(50);
   check('(redone by hand; state matches)', JSON.stringify(await state()) === before);
   const cardCount = (await state()).cards.length;
   await send('Page.navigate', { url: `${BASE}/` }); await sleep(800); u = await ui();

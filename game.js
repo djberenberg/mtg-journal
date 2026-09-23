@@ -13,8 +13,10 @@
 //   nextUid,
 // }
 //
-// instance = { uid, owner, zone, tapped, commander?, ...card }
-// where card is what scryfall.js's parseCard returns.
+// instance = { uid, owner, zone, tapped, commander?, counters?, ...card }
+// where card is what scryfall.js's parseCard returns, and
+// counters = [{ id, kind, count, x, y }]: one square per kind, at a place
+// on the card given as fractions of its box.
 
 export const MAX_OPPONENTS = 3;
 export const ZONES = ['hand', 'battlefield', 'graveyard', 'exile', 'command'];
@@ -110,8 +112,8 @@ export function play(state, uid) {
   const c = find(state, uid);
   if (!c || c.zone !== 'hand') return state;
   return isPermanent(c)
-    ? say(patch(state, uid, { zone: 'battlefield', tapped: false }), `${who(state, c.owner, 'play')} ${c.name}`)
-    : say(patch(state, uid, { zone: 'graveyard' }), `${who(state, c.owner, 'cast')} ${c.name}`);
+    ? say(patch(state, uid, { zone: 'battlefield', tapped: false, counters: [] }), `${who(state, c.owner, 'play')} ${c.name}`)
+    : say(patch(state, uid, { zone: 'graveyard', counters: [] }), `${who(state, c.owner, 'cast')} ${c.name}`);
 }
 
 export function toggleTap(state, uid) {
@@ -125,7 +127,9 @@ export function moveTo(state, uid, zone) {
   if (!c || !ZONES.includes(zone) || c.zone === zone) return state;
   // Once a card has been in the command zone it is the commander wherever
   // it goes, so it can be told apart on the battlefield.
-  const changes = zone === 'command' ? { zone, tapped: false, commander: true } : { zone, tapped: false };
+  // Counters come off a card that changes zone, as they do in the game.
+  const changes = { zone, tapped: false, counters: [] };
+  if (zone === 'command') changes.commander = true;
   return say(patch(state, uid, changes), `${label(state, c.owner, 'possessive')} ${c.name} to ${zoneName(zone)}`);
 }
 
@@ -154,6 +158,61 @@ export function adjustLife(state, player, delta) {
   if (!players(state).includes(player) || !delta) return state;
   const life = { ...state.life, [player]: state.life[player] + delta };
   return say({ ...state, life }, `${who(state, player, delta > 0 ? 'gain' : 'lose')} ${Math.abs(delta)} life (${life[player]})`);
+}
+
+// --- counters ---------------------------------------------------------
+
+export const COUNTER_LABEL_MAX = 16;
+const clamp01 = (n) => Math.max(0, Math.min(1, Number(n) || 0));
+
+// "+1/+1", "-1/-1", "+2/+0": a power/toughness change, signs made explicit
+// so "1/1" and "+1/+1" are the same kind. Anything else is a named counter,
+// "lore", "time", "loyalty", kept lowercase for the same reason.
+export function parseCounterKind(text) {
+  const t = String(text ?? '').trim();
+  if (!t || t.length > COUNTER_LABEL_MAX) return null;
+  const m = t.match(/^([+-]?)(\d+)\s*\/\s*([+-]?)(\d+)$/);
+  return m ? `${m[1] || '+'}${m[2]}/${m[3] || '+'}${m[4]}` : t.toLowerCase();
+}
+
+const counterText = (state, c, kind, delta, count) => {
+  const n = Math.abs(delta);
+  const what = `${n === 1 ? 'a' : n} ${kind} counter${n === 1 ? '' : 's'}`;
+  return delta > 0
+    ? `${who(state, c.owner, 'put')} ${what} on ${c.name} (${count})`
+    : `${who(state, c.owner, 'remove')} ${what} from ${c.name} (${count})`;
+};
+
+// One more counter of a kind. A kind already on the card stacks onto its
+// square; a new kind gets a square of its own, at the place given.
+export function addCounter(state, uid, kindText, at = { x: 0.5, y: 0.5 }) {
+  const c = find(state, uid);
+  const kind = parseCounterKind(kindText);
+  if (!c || !kind) return state;
+  const counters = c.counters ?? [];
+  const existing = counters.find((k) => k.kind === kind);
+  if (existing) return adjustCounter(state, uid, existing.id, 1);
+  const square = { id: String(state.nextUid), kind, count: 1, x: clamp01(at.x), y: clamp01(at.y) };
+  const next = { ...patch(state, uid, { counters: [...counters, square] }), nextUid: state.nextUid + 1 };
+  return say(next, counterText(state, c, kind, 1, 1));
+}
+
+// More or fewer of a square's counters. At zero the square goes.
+export function adjustCounter(state, uid, id, delta) {
+  const c = find(state, uid);
+  const k = c?.counters?.find((x) => x.id === id);
+  if (!k || !delta) return state;
+  const count = Math.max(0, k.count + delta);
+  const counters = count === 0 ? c.counters.filter((x) => x.id !== id) : c.counters.map((x) => (x.id === id ? { ...x, count } : x));
+  return say(patch(state, uid, { counters }), counterText(state, c, k.kind, count - k.count || delta, count));
+}
+
+// Where the square sits on the card: fractions of its box, kept on it.
+// Only the look changes, so there is no log line.
+export function moveCounter(state, uid, id, x, y) {
+  const c = find(state, uid);
+  if (!c?.counters?.some((k) => k.id === id)) return state;
+  return patch(state, uid, { counters: c.counters.map((k) => (k.id === id ? { ...k, x: clamp01(x), y: clamp01(y) } : k)) });
 }
 
 // A saved game back from JSON, or null if it is not one. A save from

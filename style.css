@@ -301,6 +301,106 @@ h3 { font-size: 0.68rem; }
 .pile .card .actions { display: none; }
 .pile .card:hover .actions, .pile .card:focus-within .actions { display: flex; }
 
+/* --- counters --------------------------------------------------------- */
+
+/* A layer over the card for its counters. The layer takes no pointer
+   events itself, so the card beneath still taps; the squares do. */
+.card .counters {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* Where a square sits is a fraction of the room it has to move in, not of
+   the card, so 1 is flush with the far edge at any card size and on a
+   card turned on its side. --x and --y are set by app.js. */
+.counter {
+  --sq: 2.1rem;
+  position: absolute;
+  left: calc(var(--x, 0) * (100% - var(--sq)));
+  top: calc(var(--y, 0) * (100% - var(--sq)));
+  width: var(--sq);
+  height: var(--sq);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  color: #fff;
+  background: rgba(12, 14, 19, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 5px;
+  backdrop-filter: blur(2px);
+  cursor: grab;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+.counter.dragging { cursor: grabbing; background: rgba(12, 14, 19, 0.85); }
+.counter .n { font-size: 0.95rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.counter .k { font-size: 0.5rem; letter-spacing: 0.02em; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 0 2px; }
+.pile .counter { --sq: 1.4rem; }
+.pile .counter .n { font-size: 0.7rem; }
+.pile .counter .k { display: none; }
+
+/* Plus and minus, either side of the square, on hover. */
+.counter .adj {
+  position: absolute;
+  inset: 0;
+  display: none;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.counter:hover .adj, .counter:focus-within .adj { display: flex; }
+
+.counter .adj button {
+  width: 1.1rem;
+  height: 1.1rem;
+  padding: 0;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-radius: 50%;
+  transform: translateX(-60%);
+  cursor: pointer;
+}
+
+.counter .adj button:last-child { transform: translateX(60%); }
+
+/* Choosing a counter: a strip at the top of the card. */
+.ctr-pick {
+  position: absolute;
+  z-index: 3;
+  top: 4px;
+  left: 4px;
+  right: 4px;
+  display: flex;
+  gap: 3px;
+}
+
+.ctr-pick[hidden] { display: none; }
+
+.ctr-pick input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 2px 5px;
+  color: var(--fg);
+  background: rgba(12, 14, 19, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.ctr-pick input:focus { outline: 2px solid var(--accent); }
+.ctr-pick button { padding: 0 6px; font-size: 0.7rem; }
+
 /* --- the log ---------------------------------------------------------- */
 
 .journal-log {

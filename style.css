@@ -7,9 +7,11 @@
   --accent: #8a4b2a;
   --felt: #f4f2ee;
 
-  /* One card, and everything scales from it: 488x680 is Scryfall's "normal". */
+  /* One card, and everything scales from it: 488x680 is Scryfall's "normal".
+     The height is worked out on each zone, not here, so a zone that sets a
+     smaller width gets the matching height; computed here it would be
+     inherited as the full size and squash the smaller cards. */
   --card-w: 7rem;
-  --card-h: calc(var(--card-w) * 680 / 488);
   --pile-w: 3.5rem;
 }
 
@@ -135,6 +137,7 @@ h3 { font-size: 0.75rem; }
 }
 
 .zone {
+  --card-h: calc(var(--card-w) * 680 / 488);
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
@@ -148,7 +151,7 @@ h3 { font-size: 0.75rem; }
 .piles { display: flex; flex-wrap: wrap; gap: 1rem; }
 .pile { flex: 1 1 10rem; }
 .pile h3 { margin-bottom: 0.25rem; }
-.pile .zone { --card-w: var(--pile-w); min-height: calc(var(--card-h) + 1rem); gap: 0.3rem; }
+.pile .zone { --card-w: var(--pile-w); gap: 0.3rem; }
 .pile[hidden] { display: none; }
 
 /* --- a card ----------------------------------------------------------- */

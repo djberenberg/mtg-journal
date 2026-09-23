@@ -129,6 +129,10 @@ try {
   check('and brought back to the battlefield from exile', (await zone('me', 'battlefield')).length === 1);
   await click(`.card[data-uid="${hand[0].uid}"] button[data-act="remove"]`); await sleep(50);
   check('remove deletes a card outright', (await zone('me', 'graveyard')).length === 0 && /I remove Lightning Bolt/.test((await ui()).log[0]));
+  const pileCard = await evalJs(`(()=>{const i=document.querySelector('.pile .card img');const r=i.getBoundingClientRect();const z=document.querySelector('.pile .zone').getBoundingClientRect();return {w:Math.round(r.width),h:Math.round(r.height),ratio:Math.round(r.width/r.height*1000)/1000,zoneH:Math.round(z.height)}})()`);
+  check('a card in a pile is small and keeps its proportions; the pile is only as tall as it needs', pileCard.w < 70 && Math.abs(pileCard.ratio - 488 / 680) < 0.01 && pileCard.zoneH < pileCard.h + 20, JSON.stringify(pileCard));
+  const fieldCard = await evalJs(`(()=>{const i=document.querySelector('.battlefield .card:not(.tapped) img');const r=i.getBoundingClientRect();return {w:Math.round(r.width),ratio:Math.round(r.width/r.height*1000)/1000}})()`);
+  check('a card on the battlefield is full size with the same proportions', fieldCard.w > 100 && Math.abs(fieldCard.ratio - 488 / 680) < 0.01, JSON.stringify(fieldCard));
   await shot('2-table');
 
   // undo, persistence, unknown card

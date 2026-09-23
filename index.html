@@ -9,7 +9,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='14'>&#9679;</text></svg>">
 </head>
 <body>
-<main class="journal">
+<main class="journal" id="journal">
 
   <header class="bar">
     <form class="search" id="search" autocomplete="off">
@@ -18,25 +18,34 @@
         <ul class="suggest" id="suggest" role="listbox" hidden></ul>
       </div>
       <button type="submit" id="add-me" title="Add to my hand (enter)">to my hand</button>
-      <button type="button" id="add-opp" title="The opponent plays it (shift+enter)">opponent plays</button>
+      <button type="button" id="add-opp" title="The opponent shown plays it (shift+enter)">opponent plays</button>
     </form>
+    <div class="turnbar">
+      <span class="turn" id="turn">turn 1 · my turn</span>
+      <button type="button" id="next">next turn</button>
+      <button type="button" id="undo" disabled>undo</button>
+      <button type="button" id="new">new game</button>
+      <button type="button" id="log-toggle" aria-expanded="true" aria-controls="log-panel">log</button>
+    </div>
     <p class="status" id="status" role="status" aria-live="polite"></p>
   </header>
 
   <div class="table">
     <section class="side" data-owner="opp">
+      <div class="tabs" id="opp-tabs" role="tablist" aria-label="Opponents" hidden></div>
       <h2>
-        <span class="who">opponent</span>
-        <span class="life" role="group" aria-label="Opponent's life">
+        <span class="who" id="opp-name">opponent</span>
+        <span class="life" role="group" aria-label="This opponent's life">
           <button type="button" data-life="opp" data-by="-5">-5</button>
           <button type="button" data-life="opp" data-by="-1">-1</button>
-          <output id="life-opp" aria-label="Opponent's life total">20</output>
+          <output id="life-opp" aria-label="Life total">20</output>
           <button type="button" data-life="opp" data-by="1">+1</button>
           <button type="button" data-life="opp" data-by="5">+5</button>
         </span>
       </h2>
       <div class="zone battlefield" data-owner="opp" data-zone="battlefield" aria-label="Opponent's battlefield"></div>
       <div class="piles">
+        <div class="pile"><h3>command <span class="count" data-count="opp:command">0</span></h3><div class="zone" data-owner="opp" data-zone="command" aria-label="Opponent's command zone"></div></div>
         <div class="pile"><h3>graveyard <span class="count" data-count="opp:graveyard">0</span></h3><div class="zone" data-owner="opp" data-zone="graveyard" aria-label="Opponent's graveyard"></div></div>
         <div class="pile"><h3>exile <span class="count" data-count="opp:exile">0</span></h3><div class="zone" data-owner="opp" data-zone="exile" aria-label="Opponent's exile"></div></div>
         <div class="pile" data-pile="opp:hand"><h3>hand <span class="count" data-count="opp:hand">0</span></h3><div class="zone" data-owner="opp" data-zone="hand" aria-label="Opponent's hand"></div></div>
@@ -56,6 +65,7 @@
       </h2>
       <div class="zone battlefield" data-owner="me" data-zone="battlefield" aria-label="My battlefield"></div>
       <div class="piles">
+        <div class="pile"><h3>command <span class="count" data-count="me:command">0</span></h3><div class="zone" data-owner="me" data-zone="command" aria-label="My command zone"></div></div>
         <div class="pile"><h3>graveyard <span class="count" data-count="me:graveyard">0</span></h3><div class="zone" data-owner="me" data-zone="graveyard" aria-label="My graveyard"></div></div>
         <div class="pile"><h3>exile <span class="count" data-count="me:exile">0</span></h3><div class="zone" data-owner="me" data-zone="exile" aria-label="My exile"></div></div>
       </div>
@@ -64,15 +74,31 @@
     </section>
   </div>
 
-  <aside class="journal-log">
-    <div class="turn">
-      <span id="turn">turn 1 · my turn</span>
-      <button type="button" id="next">next turn</button>
-      <button type="button" id="undo" disabled>undo</button>
-      <button type="button" id="new">new game</button>
-    </div>
+  <aside class="journal-log" id="log-panel">
     <ol id="log" reversed aria-label="Log"></ol>
   </aside>
+
+  <dialog id="new-dialog" aria-labelledby="new-title">
+    <form id="new-form">
+      <h2 id="new-title">new game</h2>
+      <fieldset>
+        <legend>opponents</legend>
+        <label><input type="radio" name="opponents" value="1" checked> 1</label>
+        <label><input type="radio" name="opponents" value="2"> 2</label>
+        <label><input type="radio" name="opponents" value="3"> 3</label>
+      </fieldset>
+      <fieldset>
+        <legend>starting life</legend>
+        <label><input type="radio" name="life" value="20" checked> 20</label>
+        <label><input type="radio" name="life" value="40"> 40</label>
+      </fieldset>
+      <p class="warn" id="new-warn" hidden>the game on the table is cleared</p>
+      <div class="buttons">
+        <button type="button" id="new-cancel">cancel</button>
+        <button type="submit" class="primary">start</button>
+      </div>
+    </form>
+  </dialog>
 
 </main>
 <script type="module" src="app.js"></script>

@@ -1,11 +1,15 @@
 :root {
-  color-scheme: light;
-  --bg: #ffffff;
-  --fg: #1c1b1a;
-  --muted: #6e6a65;
-  --rule: #e4e1dc;
-  --accent: #8a4b2a;
-  --felt: #f4f2ee;
+  color-scheme: dark;
+  --bg: #0c0e13;
+  --surface: #141821;
+  --felt: #181c26;
+  --raised: #1f2432;
+  --border: #262c3a;
+  --fg: #e7e9ef;
+  --muted: #8b92a5;
+  --accent: #7aa2f7;
+  --accent-ink: #0c0e13;
+  --danger: #f7768e;
 
   /* One card, and everything scales from it: 488x680 is Scryfall's "normal".
      The height is worked out on each zone, not here, so a zone that sets a
@@ -13,6 +17,7 @@
      inherited as the full size and squash the smaller cards. */
   --card-w: 7rem;
   --pile-w: 3.5rem;
+  --radius: 10px;
 }
 
 * { box-sizing: border-box; }
@@ -23,33 +28,36 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font: 400 15px/1.5 ui-serif, Georgia, "Times New Roman", serif;
+  font: 400 14px/1.5 system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
 }
 
 button {
   font: inherit;
   color: var(--fg);
-  background: none;
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  padding: 0.2rem 0.6rem;
+  background: var(--raised);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0.3rem 0.7rem;
   cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
-button:hover:not(:disabled) { border-color: var(--muted); }
-button:disabled { color: var(--muted); cursor: default; opacity: 0.6; }
+button:hover:not(:disabled) { background: #283044; }
+button:disabled { color: var(--muted); cursor: default; opacity: 0.55; }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+button.primary:hover { background: #93b4f9; }
 
 h2, h3 {
   margin: 0;
-  font-weight: 500;
-  letter-spacing: 0.02em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
 }
 
-h2 { font-size: 0.95rem; display: flex; align-items: baseline; gap: 1rem; }
-h3 { font-size: 0.75rem; }
+h2 { font-size: 0.8rem; display: flex; align-items: center; gap: 1rem; }
+h3 { font-size: 0.68rem; }
 
 .count { color: var(--fg); font-variant-numeric: tabular-nums; }
 
@@ -57,81 +65,132 @@ h3 { font-size: 0.75rem; }
 
 .journal {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 18rem;
+  grid-template-columns: minmax(0, 1fr) 19rem;
   grid-template-rows: auto 1fr;
-  gap: 1rem 1.5rem;
+  gap: 1rem 1.25rem;
   min-height: 100vh;
-  padding: 1rem 1.5rem;
+  padding: 1rem 1.25rem 2rem;
 }
 
 .bar { grid-column: 1 / -1; }
-.table { display: flex; flex-direction: column; gap: 1.25rem; min-width: 0; }
+.table { display: flex; flex-direction: column; gap: 1.5rem; min-width: 0; }
 
-@media (max-width: 52rem) {
-  .journal { grid-template-columns: 1fr; padding: 1rem; }
+/* With the log away, the table takes the whole width. */
+.journal.log-collapsed { grid-template-columns: minmax(0, 1fr); }
+.journal.log-collapsed .journal-log { display: none; }
+
+@media (max-width: 56rem) {
+  .journal { grid-template-columns: 1fr; padding: 0.75rem 1rem 2rem; }
 }
 
-/* --- search ----------------------------------------------------------- */
+/* --- header ----------------------------------------------------------- */
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.6rem 1.5rem;
+}
 
 .search {
   display: flex;
+  flex: 1 1 24rem;
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 0.5rem;
 }
 
-.field { position: relative; flex: 1 1 16rem; }
+.field { position: relative; flex: 1 1 14rem; }
 
 #q {
   width: 100%;
   font: inherit;
-  padding: 0.35rem 0.6rem;
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  background: var(--bg);
+  padding: 0.42rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
   color: var(--fg);
 }
 
-#q:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+#q::placeholder { color: var(--muted); }
+#q:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
 
 .suggest {
   position: absolute;
   z-index: 3;
   left: 0;
   right: 0;
-  margin: 0.2rem 0 0;
-  padding: 0.2rem 0;
+  margin: 0.25rem 0 0;
+  padding: 0.25rem 0;
   list-style: none;
-  background: var(--bg);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
   max-height: 18rem;
   overflow-y: auto;
 }
 
-.suggest li { padding: 0.25rem 0.6rem; cursor: pointer; }
-.suggest li:hover, .suggest li[aria-selected="true"] { background: var(--felt); }
+.suggest li { padding: 0.3rem 0.7rem; cursor: pointer; }
+.suggest li:hover, .suggest li[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
 
-.status {
-  margin: 0.4rem 0 0;
-  min-height: 1.5em;
-  color: var(--muted);
-  font-style: italic;
+.turnbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
 }
 
-.status.error { color: var(--accent); font-style: normal; }
+.turnbar .turn {
+  margin-right: 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.turnbar button { padding: 0.25rem 0.6rem; font-size: 0.85rem; }
+
+/* The log toggle says which way it goes. */
+#log-toggle::after { content: " ▸"; color: var(--muted); }
+#log-toggle[aria-expanded="true"]::after { content: " ▾"; }
+
+.status {
+  flex-basis: 100%;
+  margin: 0;
+  min-height: 1.5em;
+  color: var(--muted);
+}
+
+.status.error { color: var(--danger); }
 
 /* --- the table -------------------------------------------------------- */
 
 .side { display: flex; flex-direction: column; gap: 0.5rem; }
 
-.life { display: inline-flex; align-items: baseline; gap: 0.2rem; text-transform: none; letter-spacing: 0; }
-.life button { padding: 0 0.4rem; font-size: 0.8rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tabs { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.tabs[hidden] { display: none; }
+
+.tabs button {
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.tabs button[aria-selected="true"] { color: var(--fg); background: var(--raised); border-color: var(--accent); }
+.tabs button .n { color: var(--fg); font-variant-numeric: tabular-nums; margin-left: 0.4rem; }
+/* The opponent whose turn it is. */
+.tabs button.active::before { content: "●"; color: var(--accent); margin-right: 0.4rem; font-size: 0.6rem; vertical-align: 0.15em; }
+
+.life { display: inline-flex; align-items: center; gap: 0.2rem; text-transform: none; letter-spacing: 0; }
+.life button { padding: 0 0.45rem; font-size: 0.75rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .life output {
-  min-width: 2.2ch;
+  min-width: 2.4ch;
   text-align: center;
   font-size: 1.15rem;
+  font-weight: 600;
   color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
@@ -145,12 +204,13 @@ h3 { font-size: 0.75rem; }
   min-height: calc(var(--card-h) + 1rem);
   padding: 0.5rem;
   background: var(--felt);
-  border-radius: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 
-.piles { display: flex; flex-wrap: wrap; gap: 1rem; }
-.pile { flex: 1 1 10rem; }
-.pile h3 { margin-bottom: 0.25rem; }
+.piles { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.pile { flex: 1 1 9rem; }
+.pile h3 { margin-bottom: 0.3rem; }
 .pile .zone { --card-w: var(--pile-w); gap: 0.3rem; }
 .pile[hidden] { display: none; }
 
@@ -178,20 +238,42 @@ h3 { font-size: 0.75rem; }
   width: var(--card-w);
   height: var(--card-h);
   border-radius: 4.5% / 3.2%;
-  background: var(--rule);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-  transition: transform 0.15s ease, opacity 0.15s ease;
+  background: var(--raised);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  transition: transform 0.15s ease, filter 0.15s ease;
   user-select: none;
   -webkit-user-select: none;
 }
 
-.card.tapped img { transform: rotate(90deg); opacity: 0.85; }
+.card.tapped img { transform: rotate(90deg); filter: brightness(0.7); }
 .battlefield .card.permanent img { cursor: pointer; }
+.battlefield .card.permanent:hover img { box-shadow: 0 0 0 2px var(--accent), 0 2px 8px rgba(0, 0, 0, 0.6); }
+
+/* A commander wears a mark wherever it is, so it can be told from the
+   rest once it is on the battlefield. */
+.card.commander::before {
+  content: "cmd";
+  position: absolute;
+  z-index: 1;
+  top: 4px;
+  left: 4px;
+  padding: 0 4px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-radius: 3px;
+}
+
+.pile .card.commander::before { font-size: 0.5rem; top: 2px; left: 2px; padding: 0 3px; }
 
 /* What can be done with the card, shown on hover or when a button in it
    has focus. Overlaid at the bottom, upright even when the card is not. */
 .card .actions {
   position: absolute;
+  z-index: 1;
   left: 0;
   right: 0;
   bottom: 0;
@@ -208,11 +290,13 @@ h3 { font-size: 0.75rem; }
 
 .card .actions button {
   padding: 0 0.35rem;
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  background: rgba(255, 255, 255, 0.92);
-  border-color: var(--muted);
+  background: rgba(12, 14, 19, 0.85);
+  border-color: var(--border);
 }
+
+.card .actions button:hover { background: var(--accent); color: var(--accent-ink); }
 
 .pile .card .actions { display: none; }
 .pile .card:hover .actions, .pile .card:focus-within .actions { display: flex; }
@@ -220,27 +304,44 @@ h3 { font-size: 0.75rem; }
 /* --- the log ---------------------------------------------------------- */
 
 .journal-log {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
   min-width: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
 }
-
-.turn { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
-.turn #turn { margin-right: auto; }
-.turn button { padding: 0.05rem 0.45rem; font-size: 0.75rem; }
 
 #log {
   margin: 0;
-  padding: 0;
+  padding: 0.25rem 0;
   list-style: none;
   color: var(--muted);
-  max-height: 80vh;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-height: calc(100vh - 8rem);
   overflow-y: auto;
 }
 
-#log li { padding: 0.1rem 0; border-bottom: 1px solid var(--rule); overflow-wrap: anywhere; }
+#log li { padding: 0.2rem 0.7rem; overflow-wrap: anywhere; }
+#log li + li { border-top: 1px solid var(--border); }
 #log li .t { display: inline-block; min-width: 3ch; color: var(--fg); }
-#log li.turn-line { color: var(--fg); }
+#log li.turn-line { color: var(--fg); background: var(--raised); }
+
+/* --- new game --------------------------------------------------------- */
+
+dialog {
+  padding: 1.25rem 1.5rem;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+}
+
+dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+dialog h2 { margin-bottom: 1rem; }
+dialog fieldset { border: 0; padding: 0; margin: 0 0 0.9rem; display: flex; gap: 1rem; align-items: center; }
+dialog legend { padding: 0; margin-bottom: 0.3rem; font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+dialog label { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; }
+dialog input[type="radio"] { accent-color: var(--accent); }
+dialog .warn { margin: 0 0 0.9rem; color: var(--danger); font-size: 0.85rem; }
+dialog .buttons { display: flex; justify-content: flex-end; gap: 0.5rem; }

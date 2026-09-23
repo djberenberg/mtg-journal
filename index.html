@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Game journal</title>
+<meta name="description" content="A journal for a game of Magic: the board in front of you, turn by turn.">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='14'>&#9679;</text></svg>">
+</head>
+<body>
+<main class="journal">
+
+  <header class="bar">
+    <form class="search" id="search" autocomplete="off">
+      <div class="field">
+        <input id="q" type="text" placeholder="card name" aria-label="Card name" aria-autocomplete="list" aria-controls="suggest" spellcheck="false">
+        <ul class="suggest" id="suggest" role="listbox" hidden></ul>
+      </div>
+      <button type="submit" id="add-me" title="Add to my hand (enter)">to my hand</button>
+      <button type="button" id="add-opp" title="The opponent plays it (shift+enter)">opponent plays</button>
+    </form>
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+  </header>
+
+  <div class="table">
+    <section class="side" data-owner="opp">
+      <h2>
+        <span class="who">opponent</span>
+        <span class="life" role="group" aria-label="Opponent's life">
+          <button type="button" data-life="opp" data-by="-5">-5</button>
+          <button type="button" data-life="opp" data-by="-1">-1</button>
+          <output id="life-opp" aria-label="Opponent's life total">20</output>
+          <button type="button" data-life="opp" data-by="1">+1</button>
+          <button type="button" data-life="opp" data-by="5">+5</button>
+        </span>
+      </h2>
+      <div class="zone battlefield" data-owner="opp" data-zone="battlefield" aria-label="Opponent's battlefield"></div>
+      <div class="piles">
+        <div class="pile"><h3>graveyard <span class="count" data-count="opp:graveyard">0</span></h3><div class="zone" data-owner="opp" data-zone="graveyard" aria-label="Opponent's graveyard"></div></div>
+        <div class="pile"><h3>exile <span class="count" data-count="opp:exile">0</span></h3><div class="zone" data-owner="opp" data-zone="exile" aria-label="Opponent's exile"></div></div>
+        <div class="pile" data-pile="opp:hand"><h3>hand <span class="count" data-count="opp:hand">0</span></h3><div class="zone" data-owner="opp" data-zone="hand" aria-label="Opponent's hand"></div></div>
+      </div>
+    </section>
+
+    <section class="side" data-owner="me">
+      <h2>
+        <span class="who">me</span>
+        <span class="life" role="group" aria-label="My life">
+          <button type="button" data-life="me" data-by="-5">-5</button>
+          <button type="button" data-life="me" data-by="-1">-1</button>
+          <output id="life-me" aria-label="My life total">20</output>
+          <button type="button" data-life="me" data-by="1">+1</button>
+          <button type="button" data-life="me" data-by="5">+5</button>
+        </span>
+      </h2>
+      <div class="zone battlefield" data-owner="me" data-zone="battlefield" aria-label="My battlefield"></div>
+      <div class="piles">
+        <div class="pile"><h3>graveyard <span class="count" data-count="me:graveyard">0</span></h3><div class="zone" data-owner="me" data-zone="graveyard" aria-label="My graveyard"></div></div>
+        <div class="pile"><h3>exile <span class="count" data-count="me:exile">0</span></h3><div class="zone" data-owner="me" data-zone="exile" aria-label="My exile"></div></div>
+      </div>
+      <h3>hand <span class="count" data-count="me:hand">0</span></h3>
+      <div class="zone hand" data-owner="me" data-zone="hand" aria-label="My hand"></div>
+    </section>
+  </div>
+
+  <aside class="journal-log">
+    <div class="turn">
+      <span id="turn">turn 1 · my turn</span>
+      <button type="button" id="next">next turn</button>
+      <button type="button" id="undo" disabled>undo</button>
+      <button type="button" id="new">new game</button>
+    </div>
+    <ol id="log" reversed aria-label="Log"></ol>
+  </aside>
+
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

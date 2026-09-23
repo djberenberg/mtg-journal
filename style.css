@@ -1,0 +1,243 @@
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --fg: #1c1b1a;
+  --muted: #6e6a65;
+  --rule: #e4e1dc;
+  --accent: #8a4b2a;
+  --felt: #f4f2ee;
+
+  /* One card, and everything scales from it: 488x680 is Scryfall's "normal". */
+  --card-w: 7rem;
+  --card-h: calc(var(--card-w) * 680 / 488);
+  --pile-w: 3.5rem;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 400 15px/1.5 ui-serif, Georgia, "Times New Roman", serif;
+}
+
+button {
+  font: inherit;
+  color: var(--fg);
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) { border-color: var(--muted); }
+button:disabled { color: var(--muted); cursor: default; opacity: 0.6; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+h2, h3 {
+  margin: 0;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+h2 { font-size: 0.95rem; display: flex; align-items: baseline; gap: 1rem; }
+h3 { font-size: 0.75rem; }
+
+.count { color: var(--fg); font-variant-numeric: tabular-nums; }
+
+/* --- layout ----------------------------------------------------------- */
+
+.journal {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18rem;
+  grid-template-rows: auto 1fr;
+  gap: 1rem 1.5rem;
+  min-height: 100vh;
+  padding: 1rem 1.5rem;
+}
+
+.bar { grid-column: 1 / -1; }
+.table { display: flex; flex-direction: column; gap: 1.25rem; min-width: 0; }
+
+@media (max-width: 52rem) {
+  .journal { grid-template-columns: 1fr; padding: 1rem; }
+}
+
+/* --- search ----------------------------------------------------------- */
+
+.search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.field { position: relative; flex: 1 1 16rem; }
+
+#q {
+  width: 100%;
+  font: inherit;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+#q:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.suggest {
+  position: absolute;
+  z-index: 3;
+  left: 0;
+  right: 0;
+  margin: 0.2rem 0 0;
+  padding: 0.2rem 0;
+  list-style: none;
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.suggest li { padding: 0.25rem 0.6rem; cursor: pointer; }
+.suggest li:hover, .suggest li[aria-selected="true"] { background: var(--felt); }
+
+.status {
+  margin: 0.4rem 0 0;
+  min-height: 1.5em;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.status.error { color: var(--accent); font-style: normal; }
+
+/* --- the table -------------------------------------------------------- */
+
+.side { display: flex; flex-direction: column; gap: 0.5rem; }
+
+.life { display: inline-flex; align-items: baseline; gap: 0.2rem; text-transform: none; letter-spacing: 0; }
+.life button { padding: 0 0.4rem; font-size: 0.8rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.life output {
+  min-width: 2.2ch;
+  text-align: center;
+  font-size: 1.15rem;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.zone {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-height: calc(var(--card-h) + 1rem);
+  padding: 0.5rem;
+  background: var(--felt);
+  border-radius: 6px;
+}
+
+.piles { display: flex; flex-wrap: wrap; gap: 1rem; }
+.pile { flex: 1 1 10rem; }
+.pile h3 { margin-bottom: 0.25rem; }
+.pile .zone { --card-w: var(--pile-w); min-height: calc(var(--card-h) + 1rem); gap: 0.3rem; }
+.pile[hidden] { display: none; }
+
+/* --- a card ----------------------------------------------------------- */
+
+/* The figure is the card's box; the image inside it turns. Tapped, the box
+   swaps its width and height so the turned image fits it exactly and the
+   row reflows around the new shape, as cards on a table do. */
+.card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--card-w);
+  height: var(--card-h);
+  margin: 0;
+  flex-shrink: 0;
+  transition: width 0.15s ease, height 0.15s ease;
+}
+
+.card.tapped { width: var(--card-h); height: var(--card-w); }
+
+.card img {
+  display: block;
+  width: var(--card-w);
+  height: var(--card-h);
+  border-radius: 4.5% / 3.2%;
+  background: var(--rule);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s ease, opacity 0.15s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.card.tapped img { transform: rotate(90deg); opacity: 0.85; }
+.battlefield .card.permanent img { cursor: pointer; }
+
+/* What can be done with the card, shown on hover or when a button in it
+   has focus. Overlaid at the bottom, upright even when the card is not. */
+.card .actions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+  padding: 3px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.card:hover .actions, .card:focus-within .actions { opacity: 1; }
+
+.card .actions button {
+  padding: 0 0.35rem;
+  font-size: 0.7rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: rgba(255, 255, 255, 0.92);
+  border-color: var(--muted);
+}
+
+.pile .card .actions { display: none; }
+.pile .card:hover .actions, .pile .card:focus-within .actions { display: flex; }
+
+/* --- the log ---------------------------------------------------------- */
+
+.journal-log {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+}
+
+.turn { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+.turn #turn { margin-right: auto; }
+.turn button { padding: 0.05rem 0.45rem; font-size: 0.75rem; }
+
+#log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+#log li { padding: 0.1rem 0; border-bottom: 1px solid var(--rule); overflow-wrap: anywhere; }
+#log li .t { display: inline-block; min-width: 3ch; color: var(--fg); }
+#log li.turn-line { color: var(--fg); }

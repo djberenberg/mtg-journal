@@ -4,12 +4,43 @@ A board for a game of Magic you are following but cannot see: a game on the
 radio, a commentary stream, a friend's match over the phone. Type a card,
 it comes up from Scryfall, and it sits on the table in front of you.
 
-Static files, no build, no server of its own. Open `index.html` over any
-static server (it uses ES modules, so `file://` will not do):
+Static files: no build step, no dependencies, no server of its own. All it
+needs is a browser and something to serve the directory.
+
+## Install
 
 ```sh
-python3 -m http.server -d . 8000    # http://localhost:8000/
+git clone git@github.com:djberenberg/mtg-journal.git
+cd mtg-journal
+python3 -m http.server 8000        # then open http://localhost:8000/
 ```
+
+Any static server will do; the page uses ES modules, so opening
+`index.html` straight from the disk (`file://`) will not. Two others:
+
+```sh
+npx serve .                        # Node
+caddy file-server --listen :8000   # Caddy
+```
+
+Card data and images come from [Scryfall](https://scryfall.com/docs/api)
+at the moment you type a name, so it needs the internet while in use; the
+game itself is kept in the browser's local storage, nothing leaves the
+machine.
+
+### Running the tests
+
+The tests need Node 22 or later (for `node --test`, `fetch`, and
+`WebSocket`); nothing to install.
+
+```sh
+node --test tests/*.test.mjs       # the rules and the Scryfall client
+node tests/browser.mjs             # drives the page in headless Chrome
+```
+
+The browser run needs Google Chrome at its usual macOS path, or
+`CHROME=/path/to/chrome`. It stubs Scryfall from saved responses, so it
+runs offline; screenshots land in `.scratch/`.
 
 ## Using it
 

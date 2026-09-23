@@ -44,7 +44,10 @@
           <button type="button" data-life="opp" data-by="5">+5</button>
         </span>
       </h2>
-      <div class="zone battlefield" data-owner="opp" data-zone="battlefield" aria-label="Opponent's battlefield"></div>
+      <div class="zone battlefield" data-owner="opp" data-zone="battlefield" aria-label="Opponent's battlefield">
+        <div class="tier" data-tier="lands" aria-label="Opponent's lands"></div>
+        <div class="tier" data-tier="spells" aria-label="Opponent's other permanents"></div>
+      </div>
       <div class="piles">
         <div class="pile"><h3>command <span class="count" data-count="opp:command">0</span></h3><div class="zone" data-owner="opp" data-zone="command" aria-label="Opponent's command zone"></div></div>
         <div class="pile"><h3>graveyard <span class="count" data-count="opp:graveyard">0</span></h3><div class="zone" data-owner="opp" data-zone="graveyard" aria-label="Opponent's graveyard"></div></div>
@@ -64,7 +67,10 @@
           <button type="button" data-life="me" data-by="5">+5</button>
         </span>
       </h2>
-      <div class="zone battlefield" data-owner="me" data-zone="battlefield" aria-label="My battlefield"></div>
+      <div class="zone battlefield" data-owner="me" data-zone="battlefield" aria-label="My battlefield">
+        <div class="tier" data-tier="spells" aria-label="My other permanents"></div>
+        <div class="tier" data-tier="lands" aria-label="My lands"></div>
+      </div>
       <div class="piles">
         <div class="pile"><h3>command <span class="count" data-count="me:command">0</span></h3><div class="zone" data-owner="me" data-zone="command" aria-label="My command zone"></div></div>
         <div class="pile"><h3>graveyard <span class="count" data-count="me:graveyard">0</span></h3><div class="zone" data-owner="me" data-zone="graveyard" aria-label="My graveyard"></div></div>

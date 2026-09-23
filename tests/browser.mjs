@@ -18,7 +18,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 // one saved query for "lightn" and nothing for anything else.
 const fixtures = Object.fromEntries(readdirSync(join(root, 'tests/fixtures')).map((f) => [f.replace('.json', ''), JSON.parse(readFileSync(join(root, 'tests/fixtures', f)))]));
 const parseFixture = (n) => parseCard(fixtures[n]);
-const byName = { 'lightning bolt': 'bolt', bolt: 'bolt', 'llanowar elves': 'elves', elves: 'elves', 'delver of secrets': 'delver', delver: 'delver' };
+const byName = { 'lightning bolt': 'bolt', bolt: 'bolt', 'llanowar elves': 'elves', elves: 'elves', 'delver of secrets': 'delver', delver: 'delver', forest: 'forest' };
 const stub = `
   window.__requests = [];
   window.fetch = async (url, init) => {
@@ -26,7 +26,7 @@ const stub = `
     const u = new URL(url);
     const body = (() => {
       if (u.pathname === '/cards/autocomplete') return u.searchParams.get('q').toLowerCase().startsWith('lightn') ? ${JSON.stringify(fixtures.autocomplete)} : { object: 'catalog', data: [] };
-      if (u.pathname === '/cards/named') { const k = ${JSON.stringify(byName)}[u.searchParams.get('fuzzy').toLowerCase()]; return k ? ${JSON.stringify({ bolt: fixtures.bolt, elves: fixtures.elves, delver: fixtures.delver })}[k] : ${JSON.stringify(fixtures.notfound)}; }
+      if (u.pathname === '/cards/named') { const k = ${JSON.stringify(byName)}[u.searchParams.get('fuzzy').toLowerCase()]; return k ? ${JSON.stringify({ bolt: fixtures.bolt, elves: fixtures.elves, delver: fixtures.delver, forest: fixtures.forest })}[k] : ${JSON.stringify(fixtures.notfound)}; }
       return { object: 'error', status: 500, details: 'unexpected ' + url };
     })();
     await new Promise((r) => setTimeout(r, 30));
@@ -54,7 +54,7 @@ try {
   const shot = async (name) => writeFileSync(join(out, `${name}.png`), Buffer.from((await send('Page.captureScreenshot')).result.data, 'base64'));
   const results = []; const check = (name, ok, detail = '') => { results.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name} ${detail}`); };
   const state = () => evalJs(`JSON.parse(localStorage.getItem('mtg-journal.game')) ?? { cards: [] }`);
-  const zone = (owner, z) => evalJs(`[...document.querySelector('.zone[data-owner="${owner}"][data-zone="${z}"]').children].map(c=>({name:c.querySelector('img').alt, tapped:c.classList.contains('tapped'), uid:c.dataset.uid}))`);
+  const zone = (owner, z) => evalJs(`[...document.querySelectorAll('.zone[data-owner="${owner}"][data-zone="${z}"] .card')].map(c=>({name:c.querySelector('img').alt, tapped:c.classList.contains('tapped'), uid:c.dataset.uid, tier:c.closest('.tier')?.dataset.tier}))`);
   const ui = () => evalJs(`({turn: document.getElementById('turn').textContent, me: document.getElementById('life-me').textContent, opp: document.getElementById('life-opp').textContent, status: document.getElementById('status').textContent, error: document.getElementById('status').classList.contains('error'), log: [...document.querySelectorAll('#log li')].map(l=>l.textContent), undo: document.getElementById('undo').disabled, suggestions: [...document.querySelectorAll('#suggest li')].map(l=>l.textContent), suggestHidden: document.getElementById('suggest').hidden, q: document.getElementById('q').value})`);
 
   await send('Page.enable'); await send('Runtime.enable'); await send('Log.enable'); await send('Network.enable');
@@ -165,6 +165,24 @@ try {
   check('and can go back', (await zone('me', 'command')).length === 1);
   await click(`.card[data-uid="${hand[1].uid}"] button[data-act="move"][data-zone="battlefield"]`); await sleep(50);
   await shot('2-table');
+
+  // lands have a row of their own
+  await evalJs(`document.getElementById('q').focus()`);
+  await type('forest'); await key('Enter', 'Enter', 13); await sleep(300);
+  const forestUid = (await zone('me', 'hand'))[0].uid;
+  await click(`.card[data-uid="${forestUid}"] button[data-act="play"]`); await sleep(100);
+  field = await zone('me', 'battlefield');
+  check('a land played to my battlefield goes to the lands row; the creature is in the other', field.find((c) => c.name === 'Forest')?.tier === 'lands' && field.find((c) => c.name === 'Llanowar Elves')?.tier === 'spells', JSON.stringify(field));
+  const rows = JSON.parse(await evalJs(`(()=>{const r=(sel)=>document.querySelector(sel).getBoundingClientRect();const me={lands:r('.zone[data-owner="me"] .tier[data-tier="lands"]'),spells:r('.zone[data-owner="me"] .tier[data-tier="spells"]')};const op={lands:r('.zone[data-owner="opp"] .tier[data-tier="lands"]'),spells:r('.zone[data-owner="opp"] .tier[data-tier="spells"]')};return JSON.stringify({meLandsBelow:me.lands.top>me.spells.bottom-1,oppLandsAbove:op.lands.bottom<=op.spells.top+1,emptyRowThin:op.lands.height<40,labels:[...document.querySelectorAll('.tier')].map(t=>getComputedStyle(t,'::before').content)})})()`));
+  check('my lands row is below my other permanents; the opponent\'s is above theirs; an empty row is a thin labelled strip', rows.meLandsBelow && rows.oppLandsAbove && rows.emptyRowThin && rows.labels.every((l) => /lands|spells/.test(l)), JSON.stringify(rows));
+  await type('forest'); await key('Enter', 'Enter', 13, 8); await sleep(300);
+  check('the opponent\'s land goes to their lands row', (await zone('opp', 'battlefield')).find((c) => c.name === 'Forest')?.tier === 'lands');
+  await click(`.card[data-uid="${forestUid}"] img`); await sleep(100);
+  check('a land taps like any permanent', (await zone('me', 'battlefield')).find((c) => c.name === 'Forest').tapped);
+  await shot('8-lands');
+  await click(`.card[data-uid="${forestUid}"] button[data-act="remove"]`); await sleep(50);
+  await click(`.card[data-uid="${(await zone('opp', 'battlefield')).find((c) => c.name === 'Forest').uid}"] button[data-act="remove"]`); await sleep(50);
+  check('(both lands removed for the checks that follow)', (await zone('me', 'battlefield')).length === 1 && (await zone('opp', 'battlefield')).length === 1);
 
   // counters
   const elvesSel = `.card[data-uid="${hand[1].uid}"]`;

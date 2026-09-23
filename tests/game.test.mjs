@@ -7,13 +7,14 @@ import { parseCard } from '../scryfall.js';
 import {
   newGame, addCard, play, toggleTap, moveTo, remove, nextTurn, adjustLife,
   isPermanent, cardsIn, load, players, label, setOpponents, MAX_OPPONENTS, resetGame,
-  parseCounterKind, addCounter, adjustCounter, moveCounter,
+  parseCounterKind, addCounter, adjustCounter, moveCounter, isLand,
 } from '../game.js';
 
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url)));
 const BOLT = parseCard(fixture('bolt'));
 const ELVES = parseCard(fixture('elves'));
 const DELVER = parseCard(fixture('delver'));
+const FOREST = parseCard(fixture('forest'));
 
 const last = (s) => s.log[s.log.length - 1];
 const only = (s, owner, zone) => { const c = cardsIn(s, owner, zone); assert.equal(c.length, 1); return c[0]; };
@@ -401,4 +402,25 @@ test('a game with counters survives a save and load', () => {
   const [g0, uid] = onField();
   const g = addCounter(g0, uid, 'lore', { x: 0.1, y: 0.2 });
   assert.deepEqual(load(JSON.stringify(g)), g);
+});
+
+// --- lands ---------------------------------------------------------------
+
+test('isLand: anything with Land in its front-face type line', () => {
+  assert.equal(isLand(FOREST), true);
+  for (const t of ['Basic Land — Forest', 'Land', 'Land Creature — Forest Dryad', 'Artifact Land', 'Legendary Land']) {
+    assert.equal(isLand({ typeLine: t }), true, t);
+  }
+  for (const t of ['Creature — Elf Druid', 'Instant', 'Enchantment — Aura', 'Creature — Landwalker', 'Sorcery // Land']) {
+    assert.equal(isLand({ typeLine: t }), false, t);
+  }
+  assert.equal(isLand(ELVES), false);
+  assert.equal(isLand(DELVER), false);
+});
+
+test('a land is a permanent, and plays to the battlefield like one', () => {
+  assert.equal(isPermanent(FOREST), true);
+  let g = addCard(newGame(), FOREST, 'me');
+  g = play(g, only(g, 'me', 'hand').uid);
+  only(g, 'me', 'battlefield');
 });

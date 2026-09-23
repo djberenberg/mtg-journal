@@ -44,6 +44,12 @@ export function isPermanent(card) {
   return PERMANENT_TYPES.some((t) => new RegExp(`\\b${t}\\b`).test(front));
 }
 
+// Lands sit in their own row on the battlefield. The front face decides,
+// so a modal card with a land on the back still goes where its front says.
+export function isLand(card) {
+  return /\bLand\b/.test((card.typeLine || '').split('//')[0]);
+}
+
 export const cardsIn = (state, owner, zone) => state.cards.filter((c) => c.owner === owner && c.zone === zone);
 const find = (state, uid) => state.cards.find((c) => c.uid === uid);
 

@@ -66,7 +66,8 @@ runs offline; screenshots land in `.scratch/`.
   `cmd` mark wherever it goes, so the commander can be told from the rest
   on the battlefield.
 - Click a permanent on the battlefield to tap or untap it. It turns on its
-  side.
+  side. Lands have a row of their own on each battlefield, the row nearer
+  their owner: above for the opponent, below for me.
 - **next turn** passes the turn round the table, me then each opponent in
   order, and untaps the new active player's permanents. An opponent's turn
   brings their board up. Life totals have −5 / −1 / +1 / +5 beside them.

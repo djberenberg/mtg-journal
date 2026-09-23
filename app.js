@@ -18,7 +18,10 @@ const journal = $('journal');
 const tabs = $('opp-tabs');
 const dialog = $('new-dialog');
 // The DOM has one opponent side; it shows whichever opponent is in view.
+// A battlefield is two rows, so a card there goes to its row, not the zone.
 const zones = new Map([...document.querySelectorAll('.zone')].map((z) => [`${z.dataset.owner}:${z.dataset.zone}`, z]));
+const tiers = new Map([...document.querySelectorAll('.tier')].map((t) => [`${t.closest('.zone').dataset.owner}:${t.dataset.tier}`, t]));
+const placeFor = (side, c) => (c.zone === 'battlefield' ? tiers.get(`${side}:${G.isLand(c) ? 'lands' : 'spells'}`) : zones.get(`${side}:${c.zone}`));
 
 // --- state ------------------------------------------------------------
 
@@ -180,8 +183,8 @@ function render() {
   for (const c of game.cards) {
     seen.add(c.uid);
     const el = cardEl(c);
-    if (c.owner === 'me') zones.get(`me:${c.zone}`).appendChild(el);
-    else if (c.owner === view.opp) zones.get(`opp:${c.zone}`).appendChild(el);
+    if (c.owner === 'me') placeFor('me', c).appendChild(el);
+    else if (c.owner === view.opp) placeFor('opp', c).appendChild(el);
     else el.remove(); // another opponent's: kept, not shown
   }
   for (const [uid, el] of cardEls) {

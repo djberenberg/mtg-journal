@@ -12,6 +12,10 @@
 <main class="journal" id="journal">
 
   <header class="bar">
+    <nav class="navbar" id="navbar" aria-label="Actions">
+      <button type="button" class="menu-btn" id="menu-game" aria-haspopup="menu" aria-expanded="false">game</button>
+      <button type="button" class="menu-btn" id="menu-card" aria-haspopup="menu" aria-expanded="false" disabled>card</button>
+    </nav>
     <form class="search" id="search" autocomplete="off">
       <div class="field">
         <input id="q" type="text" placeholder="card name" aria-label="Card name" aria-autocomplete="list" aria-controls="suggest" spellcheck="false">
@@ -24,8 +28,6 @@
       <span class="turn" id="turn">turn 1 · my turn</span>
       <button type="button" id="next">next turn</button>
       <button type="button" id="undo" disabled>undo</button>
-      <button type="button" id="reset" title="Clear the table and start over with the same opponents and life">reset game</button>
-      <button type="button" id="new">new game</button>
       <button type="button" id="log-toggle" aria-expanded="true" aria-controls="log-panel">log</button>
     </div>
     <p class="status" id="status" role="status" aria-live="polite"></p>
@@ -90,6 +92,9 @@
     <input id="ctr-kind" type="text" value="+1/+1" maxlength="16" aria-label="Counter: +N/+M, or a name such as lore" spellcheck="false">
     <button type="submit" class="primary">add</button>
   </form>
+
+  <!-- Filled and placed wherever a menu was asked for; one for the page. -->
+  <div class="menu" id="menu" role="menu" hidden></div>
 
   <dialog id="new-dialog" aria-labelledby="new-title">
     <form id="new-form">

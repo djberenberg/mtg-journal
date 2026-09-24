@@ -134,6 +134,52 @@ h3 { font-size: 0.68rem; }
 .suggest li { padding: 0.3rem 0.7rem; cursor: pointer; }
 .suggest li:hover, .suggest li[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
 
+/* Wherever it was asked for: under a navbar button, or at the pointer.
+   app.js puts it in place, over anything else on the page. */
+.menu {
+  position: fixed;
+  z-index: 4;
+  min-width: 9rem;
+  max-width: calc(100vw - 16px);
+  padding: 0.25rem 0;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+/* The container is only focused so the arrow keys have somewhere to start;
+   the item that has the focus is the one that shows it. */
+.menu:focus { outline: none; }
+
+.menu button {
+  display: block;
+  width: 100%;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.85rem;
+  text-align: left;
+  background: transparent;
+  border-radius: 0;
+}
+
+.menu button:hover:not(:disabled), .menu button:focus { background: var(--accent); color: var(--accent-ink); }
+.menu button:focus-visible { outline-offset: -2px; }
+.menu hr { margin: 0.25rem 0; border: 0; border-top: 1px solid var(--border); }
+
+/* A thin row of text-like buttons above the search, quiet until they are
+   reached for or their menu is up. */
+.navbar { flex-basis: 100%; display: flex; gap: 0.1rem; }
+
+.menu-btn {
+  padding: 0.1rem 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  background: transparent;
+}
+
+.menu-btn:hover:not(:disabled) { color: var(--fg); background: transparent; }
+.menu-btn[aria-expanded="true"] { color: var(--fg); background: var(--raised); }
+
 .turnbar {
   display: flex;
   flex-wrap: wrap;

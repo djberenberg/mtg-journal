@@ -326,6 +326,121 @@ suggest.addEventListener('mousedown', (e) => {
 
 q.addEventListener('blur', () => setTimeout(closeSuggestions, 100));
 
+// --- menus ------------------------------------------------------------
+
+// One popup for the page, filled and placed wherever it was asked for: a
+// navbar button hangs it underneath, a right-click drops it at the pointer.
+const menu = $('menu');
+const MENU_EDGE = 8; // how far the popup keeps clear of the viewport's edges
+
+// The container takes the focus when a menu is opened with the mouse, so
+// the arrow keys have somewhere to start from without a focus ring landing
+// on an item the pointer is not over.
+menu.tabIndex = -1;
+
+// Whether the last thing the user did was press a key. A menu opened from
+// the keyboard puts the focus on its first item; one opened with the mouse
+// leaves it on the container.
+let byKey = false;
+window.addEventListener('keydown', () => { byKey = true; }, true);
+window.addEventListener('pointerdown', () => { byKey = false; }, true);
+
+// What opened the menu that is up, and null when none is: view-only, so
+// neither committed nor persisted.
+let menuOpener = null;
+
+function menuOpen() {
+  return menuOpener !== null;
+}
+
+const enabledItems = () => [...menu.querySelectorAll('[role="menuitem"]:not(:disabled)')];
+
+// items: { label, title?, disabled?, run() }, or '-' for a separator.
+function openMenu(opener, items, at) {
+  closeMenu();
+  menuOpener = opener;
+  menu.replaceChildren(...items.map((it) => {
+    if (it === '-') {
+      const rule = document.createElement('hr');
+      rule.role = 'separator';
+      return rule;
+    }
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.role = 'menuitem';
+    b.textContent = it.label;
+    if (it.title) b.title = it.title;
+    b.disabled = Boolean(it.disabled);
+    // Close first, then run, so a run() that opens a dialog keeps the focus.
+    b.addEventListener('click', () => { closeMenu(); it.run(); });
+    return b;
+  }));
+  menu.hidden = false;
+  placeMenu(at); // measured filled and shown, or it has no size yet
+  // Only something that declares itself a menu button carries the state; a
+  // card that was right-clicked is not one.
+  if (opener.hasAttribute('aria-expanded')) opener.setAttribute('aria-expanded', 'true');
+  (byKey ? (enabledItems()[0] ?? menu) : menu).focus();
+}
+
+function closeMenu() {
+  if (!menuOpener) return;
+  const opener = menuOpener;
+  const held = menu.contains(document.activeElement); // asked before it is emptied
+  menuOpener = null;
+  menu.hidden = true;
+  menu.replaceChildren();
+  if (opener.hasAttribute('aria-expanded')) opener.setAttribute('aria-expanded', 'false');
+  // The focus goes back where the menu came from, unless whatever closed
+  // the menu has already put it somewhere of its own.
+  if (held || document.activeElement === document.body) opener.focus();
+}
+
+// At the pointer, or under the opener; flipped to the other side of it when
+// the viewport has no room below or to the right, and clamped either way.
+function placeMenu(at) {
+  // Measured in the top corner, where nothing squeezes it narrower than it
+  // wants to be; the place it ends up is worked out from that size.
+  menu.style.left = `${MENU_EDGE}px`;
+  menu.style.top = `${MENU_EDGE}px`;
+  const box = menu.getBoundingClientRect();
+  const r = menuOpener.getBoundingClientRect();
+  const vw = document.documentElement.clientWidth;
+  const vh = document.documentElement.clientHeight;
+  const near = { x: at ? at.x : r.left, y: at ? at.y : r.bottom };
+  const far = { x: at ? at.x : r.right, y: at ? at.y : r.top };
+  const x = near.x + box.width > vw - MENU_EDGE ? far.x - box.width : near.x;
+  const y = near.y + box.height > vh - MENU_EDGE ? far.y - box.height : near.y;
+  menu.style.left = `${Math.max(MENU_EDGE, Math.min(x, vw - MENU_EDGE - box.width))}px`;
+  menu.style.top = `${Math.max(MENU_EDGE, Math.min(y, vh - MENU_EDGE - box.height))}px`;
+}
+
+// Enter and space are the button's own; the rest is the menu's. The arrows
+// wrap, and step over a disabled item.
+menu.addEventListener('keydown', (e) => {
+  const items = enabledItems();
+  if (!items.length) return;
+  const i = items.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown') (i < 0 ? items[0] : items[(i + 1) % items.length]).focus();
+  else if (e.key === 'ArrowUp') (i < 0 ? items.at(-1) : items[(i - 1 + items.length) % items.length]).focus();
+  else if (e.key === 'Home') items[0].focus();
+  else if (e.key === 'End') items.at(-1).focus();
+  else return;
+  e.preventDefault();
+});
+
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+
+// Any click outside closes it. The opener's own click is its toggle, which
+// is handled where the menu is opened; this runs after that.
+document.addEventListener('click', (e) => {
+  if (menuOpen() && !menu.contains(e.target) && !menuOpener.contains(e.target)) closeMenu();
+});
+
+// The popup is fixed where it was put, so it would be left behind.
+window.addEventListener('scroll', () => closeMenu(), true);
+window.addEventListener('resize', () => closeMenu());
+
 // --- the table --------------------------------------------------------
 
 // --- counters ---------------------------------------------------------
@@ -452,18 +567,33 @@ $('log-toggle').addEventListener('click', () => {
   render();
 });
 
-$('new').addEventListener('click', () => {
-  $('new-warn').hidden = game.cards.length === 0 && game.log.length <= 1;
-  dialog.showModal();
-});
-
 // Reset keeps the seats and the starting life; new game asks for them
 // again. Neither needs a confirmation on top: undo brings the game back.
-$('reset').addEventListener('click', () => {
-  commit(G.resetGame(game));
-  show('opp1');
-  setStatus('game reset (undo brings it back)');
-  q.focus();
+const GAME_MENU = [
+  {
+    label: 'new game',
+    title: 'start over; asks for opponents and life',
+    run: () => {
+      $('new-warn').hidden = game.cards.length === 0 && game.log.length <= 1;
+      dialog.showModal();
+    },
+  },
+  {
+    label: 'reset game',
+    title: 'clear the table, same opponents and life',
+    run: () => {
+      commit(G.resetGame(game));
+      show('opp1');
+      setStatus('game reset (undo brings it back)');
+      q.focus();
+    },
+  },
+];
+
+$('menu-game').addEventListener('click', (e) => {
+  // A second click on the button puts its own menu away again.
+  if (menuOpener === e.currentTarget) closeMenu();
+  else openMenu(e.currentTarget, GAME_MENU);
 });
 
 $('new-cancel').addEventListener('click', () => dialog.close());
@@ -479,7 +609,7 @@ $('new-form').addEventListener('submit', (e) => {
 
 // "/" goes to the search box from anywhere, as on most sites.
 window.addEventListener('keydown', (e) => {
-  if (dialog.open) return;
+  if (dialog.open || menuOpen()) return;
   if (e.key === '/' && document.activeElement !== q) { e.preventDefault(); q.focus(); }
   if ((e.metaKey || e.ctrlKey) && e.key === 'z' && document.activeElement !== q) { e.preventDefault(); undo(); }
 });

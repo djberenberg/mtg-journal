@@ -58,11 +58,18 @@ try {
   const ui = () => evalJs(`({turn: document.getElementById('turn').textContent, me: document.getElementById('life-me').textContent, opp: document.getElementById('life-opp').textContent, status: document.getElementById('status').textContent, error: document.getElementById('status').classList.contains('error'), log: [...document.querySelectorAll('#log li')].map(l=>l.textContent), undo: document.getElementById('undo').disabled, suggestions: [...document.querySelectorAll('#suggest li')].map(l=>l.textContent), suggestHidden: document.getElementById('suggest').hidden, q: document.getElementById('q').value})`);
 
   await send('Page.enable'); await send('Runtime.enable'); await send('Log.enable'); await send('Network.enable');
+  await send('Network.setCacheDisabled', { cacheDisabled: true }); // the profile outlives the run; a cached page would be the last one's
   await send('Page.addScriptToEvaluateOnNewDocument', { source: stub });
   await send('Page.navigate', { url: `${BASE}/` }); await sleep(800);
   await evalJs(`localStorage.clear()`); await send('Page.navigate', { url: `${BASE}/` }); await sleep(800);
   const el = (sel, prop) => evalJs(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});return e?${prop}:null})()`);
   const width = (sel) => evalJs(`document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect().width`);
+  // The menus: opened with a real press, so the page can tell a mouse from a
+  // key, and chosen from by the item's label.
+  const clickAt = async (sel) => { const p = JSON.parse(await evalJs(`(()=>{const r=document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2})})()`)); await mouse('mousePressed', p.x, p.y); await mouse('mouseReleased', p.x, p.y, 0); await sleep(80); };
+  const menuUi = () => evalJs(`({hidden: document.getElementById('menu').hidden, expanded: document.getElementById('menu-game').getAttribute('aria-expanded'), items: [...document.querySelectorAll('#menu [role="menuitem"]')].map(b=>({label:b.textContent, title:b.title})), focus: document.activeElement.id, roles: [...document.getElementById('menu').children].map(c=>c.getAttribute('role'))})`);
+  const menuPick = async (label) => { const r = await evalJs(`(()=>{const b=[...document.querySelectorAll('#menu [role="menuitem"]')].find(b=>b.textContent===${JSON.stringify(label)});if(!b)return 'missing';b.click();return 'ok'})()`); await sleep(120); return r; };
+  const fromGameMenu = async (label) => { await clickAt('#menu-game'); return menuPick(label); };
   const oppUi = () => evalJs(`({name: document.getElementById('opp-name').textContent, life: document.getElementById('life-opp').textContent, addLabel: document.getElementById('add-opp').textContent, tabsHidden: document.getElementById('opp-tabs').hidden, tabs: [...document.querySelectorAll('#opp-tabs button')].map(b=>({text:b.textContent, selected:b.getAttribute('aria-selected')==='true', active:b.classList.contains('active')}))})`);
 
   let u = await ui();
@@ -297,12 +304,37 @@ try {
   check('the box keeps the text for fixing', u.q === 'xyzzyplugh');
   await evalJs(`document.getElementById('q').value=''`);
 
+  // the navbar's game menu
+  await clickAt('#menu-game');
+  let m = await menuUi();
+  check('the game button opens a menu of new game and reset game, each with what it does', !m.hidden && m.expanded === 'true' && m.items.map((i) => i.label).join('|') === 'new game|reset game' && /opponents and life/.test(m.items[0].title) && /same opponents and life/.test(m.items[1].title) && m.roles.every((r) => r === 'menuitem'), JSON.stringify(m));
+  check('the card button is there but disabled until it has a card', (await el('#menu-card', 'e.disabled')) === true);
+  const menuBox = JSON.parse(await evalJs(`(()=>{const m=document.getElementById('menu').getBoundingClientRect();const b=document.getElementById('menu-game').getBoundingClientRect();return JSON.stringify({fixed:getComputedStyle(document.getElementById('menu')).position,under:m.top>=b.bottom-1&&Math.abs(m.left-b.left)<1,inView:m.left>=8&&m.top>=8&&m.right<=innerWidth-8&&m.bottom<=innerHeight-8})})()`));
+  check('the menu hangs under the button, fixed and inside the viewport', menuBox.fixed === 'fixed' && menuBox.under && menuBox.inView, JSON.stringify(menuBox));
+  check('opened with the mouse, the focus waits on the menu, not on an item', m.focus === 'menu');
+  await key('ArrowDown', 'ArrowDown', 40); await sleep(30);
+  check('arrow down takes the first item', (await evalJs(`document.activeElement.textContent`)) === 'new game');
+  await key('ArrowDown', 'ArrowDown', 40); await key('ArrowDown', 'ArrowDown', 40); await sleep(30);
+  check('and wraps round the two of them', (await evalJs(`document.activeElement.textContent`)) === 'new game');
+  await key('End', 'End', 35); await sleep(30);
+  check('end jumps to the last', (await evalJs(`document.activeElement.textContent`)) === 'reset game');
+  await key('Escape', 'Escape', 27); await sleep(50);
+  check('escape closes the menu, unsays it is open, and gives the button back the focus', (await el('#menu', 'e.hidden')) && (await el('#menu-game', "e.getAttribute('aria-expanded')")) === 'false' && (await evalJs(`document.activeElement.id`)) === 'menu-game');
+  await key('Enter', 'Enter', 13); await sleep(80);
+  check('opened from the keyboard, the focus lands on the first item', (await evalJs(`document.activeElement.textContent`)) === 'new game' && !(await el('#menu', 'e.hidden')));
+  await key('Escape', 'Escape', 27); await sleep(50);
+  await clickAt('#menu-game');
+  await evalJs(`document.body.click()`); await sleep(50);
+  check('a click outside puts the menu away', (await el('#menu', 'e.hidden')) && (await el('#menu-game', "e.getAttribute('aria-expanded')")) === 'false');
+  await clickAt('#menu-game');
+  await clickAt('#menu-game');
+  check('a second click on the button closes its own menu rather than reopening it', await el('#menu', 'e.hidden'));
+
   // new game: the dialog, cancelled, then a three-opponent commander game
-  await click('#new'); await sleep(100);
-  check('new game opens a dialog, warning that the table is cleared', (await el('#new-dialog', 'e.open')) && !(await el('#new-warn', 'e.hidden')));
+  check('choosing new game from the menu puts the menu away and opens the dialog, warning that the table is cleared', (await fromGameMenu('new game')) === 'ok' && (await el('#menu', 'e.hidden')) && (await el('#new-dialog', 'e.open')) && !(await el('#new-warn', 'e.hidden')));
   await click('#new-cancel'); await sleep(50);
   check('cancel closes it and changes nothing', !(await el('#new-dialog', 'e.open')) && (await state()).cards.length === cardCount);
-  await click('#new'); await sleep(50);
+  await fromGameMenu('new game');
   await click('input[name="opponents"][value="3"]'); await click('input[name="life"][value="40"]');
   await evalJs(`document.getElementById('new-form').requestSubmit()`); await sleep(200); u = await ui(); o = await oppUi();
   check('three opponents at 40: the table is cleared, everyone at 40, three tabs', (await state()).cards.length === 0 && u.turn === 'turn 1 · my turn' && u.me === '40' && u.opp === '40' && /3 opponents, 40 life/.test(u.log[0]) && !o.tabsHidden && o.tabs.length === 3 && o.tabs[0].selected && o.name === 'opponent 1' && o.addLabel === 'opponent 1 plays', JSON.stringify({ turn: u.turn, me: u.me, o }));
@@ -336,7 +368,7 @@ try {
 
   // reset: same table, cleared
   const beforeReset = await state();
-  await click('#reset'); await sleep(100); u = await ui(); o = await oppUi();
+  await fromGameMenu('reset game'); u = await ui(); o = await oppUi();
   check('reset clears the table and starts over with the same three opponents at 40', (await state()).cards.length === 0 && u.turn === 'turn 1 · my turn' && u.me === '40' && u.opp === '40' && o.tabs.length === 3 && o.tabs.every((t) => /40$/.test(t.text)) && o.tabs[0].selected && u.log.length === 1 && /game reset: 3 opponents, 40 life/.test(u.log[0]) && (await evalJs(`document.querySelectorAll('.card').length`)) === 0, JSON.stringify({ turn: u.turn, log: u.log, tabs: o.tabs.map((t) => t.text) }));
   check('the status line says undo brings it back', /undo/.test(u.status) && !u.error, u.status);
   await click('#undo'); await sleep(100); u = await ui();

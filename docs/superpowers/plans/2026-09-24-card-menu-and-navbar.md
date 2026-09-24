@@ -638,3 +638,91 @@ vertical space.
 - `−` gives life back
 - undo steps a tick back, life and tally together
 - a reload keeps the tallies
+
+## Task 10 — dragging cards into order on the battlefield
+
+Added to the plan on 2026-09-24, after the original approval. Runs after
+Task 9 and **before** Task 8, so the sweep and the README cover it.
+
+**Files:** `game.js`, `app.js`, `style.css`, `tests/game.test.mjs`,
+`tests/browser.mjs`
+
+A card on the battlefield can be picked up and dropped into a new place in
+its own row. Lands reorder among lands, everything else among the rest:
+a drag never crosses between the two rows, never leaves the battlefield,
+and never changes whose card it is. It is the order on the table, nothing
+more — no zone change, no tap.
+
+### The rules
+
+`state.cards` is the order everything renders in, so a reorder is a move
+within that array.
+
+```js
+export function reorderCard(state, uid, beforeUid)
+```
+
+- `beforeUid` is the uid of the card to drop in front of, or `null` to drop
+  at the end of the run.
+- Returns `state` unchanged if: either uid is unknown, `uid === beforeUid`,
+  the two cards differ in `owner`, in `zone`, or in `isLand(...)` (so the
+  two battlefield rows stay separate), the moving card is not on the
+  battlefield, or the move would not actually change the order.
+- With `beforeUid === null`, the card goes after the last card sharing its
+  owner, zone, and row; it does **not** go to the end of the whole array,
+  which would reorder nothing visible but churn the save.
+- **No log line.** Where a card sits on the table is a matter of
+  presentation, like where a counter square sits — `moveCounter` sets the
+  precedent and logs nothing. It still returns a new state, so it is saved
+  and undoable like everything else.
+
+### The page
+
+Extend the pointer handling that already lives on `.table` for counter
+squares; do not add a second independent drag system.
+
+- A drag starts on `pointerdown` on a `.card` inside a `.tier`, with the
+  left button, when the target is not a counter square and not a button,
+  and when `e.pointerType !== 'touch'` (see the ruling below).
+- Nothing happens until the pointer has moved 4px, the same idea as the
+  counter drag's 3px. Under that, it is a click, and the existing handler
+  taps the permanent as it does today.
+- Once it is a drag: the card takes a `.dragging` class (raised, ~0.85
+  opacity, `cursor: grabbing`, and no hover zoom — Task 4 adds that zoom, so
+  the rule must sit after it and win). The card follows the pointer.
+- **Live reordering, not a drop marker.** As the pointer passes the midpoint
+  of a sibling in the same tier, move the dragged element in the DOM right
+  then. The row shows the arrangement as it will be. On release, read the
+  element's new index among its siblings and `commit()` the matching
+  `reorderCard`. Because `render()` draws in state order, a committed
+  reorder leaves the DOM exactly as the drag left it.
+- If the pointer is released outside the tier, or the drag is cancelled
+  (`pointercancel`, Escape), put the element back where it started and
+  commit nothing.
+- A drag must **not** also tap the card. The counter drag already faces this
+  and tracks a `moved` flag; do the same, and make the `.table` click
+  handler ignore the click that ends a real drag.
+- The menu from Task 3 must not open from a drag: if a drag is in progress,
+  a `contextmenu` event is ignored.
+
+### Tests
+
+`tests/game.test.mjs`:
+- a card moves in front of a named sibling, and `cardsIn` reports the new
+  order
+- `beforeUid === null` puts it last among its own row, and cards belonging
+  to other owners, zones, or the other row keep their places
+- the same state object comes back for: an unknown uid, an unknown
+  `beforeUid`, `uid === beforeUid`, a card not on the battlefield, a land
+  and a non-land, two different owners, and a move that changes nothing
+- no log line is added by a reorder
+
+`tests/browser.mjs`:
+- dragging the second of three creatures in front of the first reorders the
+  row, and the saved game agrees
+- a drag does not tap the card
+- a plain click still taps it
+- a land cannot be dropped into the spells row: the drag leaves the order
+  unchanged
+- the order survives a reload
+- undo puts the order back

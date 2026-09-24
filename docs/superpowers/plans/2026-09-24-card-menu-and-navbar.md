@@ -516,3 +516,125 @@ Then run both suites, read the whole diff of the branch against `main`, and
 fix anything inconsistent: dead CSS for elements that no longer exist, dead
 handlers, stale comments describing the old behaviour, and any `README`
 claim that no longer matches the code.
+
+## Task 9 — the commander damage ticker
+
+Added to the plan on 2026-09-24, after the original approval. Runs **before**
+Task 8, so the sweep and the README cover it.
+
+**Files:** `game.js`, `app.js`, `index.html`, `style.css`,
+`tests/game.test.mjs`, `tests/browser.mjs`
+
+Commander damage is tracked **per commander card**, not per opposing player,
+so partners and a Background each keep their own tally. Twenty-one from one
+commander is lethal, and the journal says so.
+
+### The state
+
+A new key on the game state, alongside `life`:
+
+```js
+cmdDamage: { [recipient]: { [commanderUid]: n } }
+```
+
+`recipient` is a seat (`me`, `opp1`…); `commanderUid` is the `uid` of the
+card that carries `commander: true`. Absent keys mean zero — never write a
+zero entry, delete it instead, so a saved game stays small and
+`JSON.stringify` does not grow a tally for every pair at the table.
+
+`load()` must tolerate a save with no `cmdDamage` (every existing save):
+default it to `{}`. Do not reject such a save.
+
+A card is a commander exactly when `c.commander === true`, which `game.js`
+already sets the moment a card enters the command zone and never unsets.
+Add an exported helper:
+
+```js
+export const commanders = (state) => state.cards.filter((c) => c.commander);
+```
+
+### The rules
+
+```js
+export function adjustCommanderDamage(state, recipient, commanderUid, delta)
+```
+
+- Returns `state` unchanged if `recipient` is not in `players(state)`, if no
+  card with that uid exists or it is not a commander, if the commander's
+  owner **is** the recipient (a commander does not deal commander damage to
+  its own controller), or if `delta` is not a non-zero finite number.
+- The new tally is `Math.max(0, current + Math.round(delta))`. A tally of
+  zero deletes the key.
+- **The damage also takes the life.** The same call subtracts the *applied*
+  amount from `life[recipient]` — applied, not requested, so that pulling a
+  tally down from 3 to 0 with a delta of `-5` gives 3 life back, not 5.
+  Tick up by 4: four life gone. Tick down by 1 (a correction): one life back.
+- One log line for the whole thing, through `say`:
+  `` `${label(state, recipient, 'possessive')} <n> from <commander name> (<tally>), <life> life` ``
+  — e.g. `opponent 2's 4 from Atraxa, Praetors' Voice (4), 36 life`. For a
+  correction (negative delta) the line reads `… −1 from …` with a real minus
+  sign, matching the counter log's style.
+- When the tally reaches 21 or more **and the previous tally was below 21**,
+  append a second log line:
+  `` `${label(state, recipient)} ${recipient === 'me' ? 'am' : 'is'} dead to ${name}'s commander damage (21)` ``
+  Only on the crossing, so ticking 21→22 does not repeat it.
+
+`setLife` (Task 1) and `adjustLife` are unchanged and stay independent: a
+player can still lose life without it being commander damage.
+
+`newGame` seeds `cmdDamage: {}`. `resetGame` gets a fresh one from `newGame`.
+`remove()` — a card taken off the table as a mistake — must also drop that
+commander's tallies from every recipient, or the ticker outlives its card.
+
+### The page
+
+Under each life total, a row of tickers — one per commander whose owner is
+not that side. Markup: an empty `<div class="cmd-dmg" id="cmd-dmg-me">` and
+`<div class="cmd-dmg" id="cmd-dmg-opp">` directly after each `<h2>` in
+`index.html`; `render()` fills them.
+
+Each ticker is a small group: the commander's name (truncated with
+`text-overflow: ellipsis`, `title` giving the full name), the tally, and
+`−` / `+` buttons, styled like the `.life` buttons but smaller. Clicking `+`
+calls `commit(G.adjustCommanderDamage(game, side, uid, 1))`; `−` passes `-1`.
+Hold the same resolution rule the life buttons use: the `me` row acts on
+`me`, the opponent row acts on `view.opp`.
+
+At 21 or more the ticker takes a `.lethal` class: `--danger` text and a
+`--danger` border, so it reads across the table.
+
+The opponent row shows commanders belonging to **anyone but the opponent in
+view**, including mine. My row shows every opponent's commanders. With one
+opponent and one commander each, that is one ticker per side — the common
+case, and it must look calm, not like a control panel.
+
+An empty row (no commanders on the table yet) renders nothing and takes no
+vertical space.
+
+### Tests
+
+`tests/game.test.mjs`:
+- ticking up 4 sets the tally to 4 and takes 4 life, with the log line in
+  the exact format above
+- a second tick of 3 makes it 7 and takes 3 more
+- ticking down 1 gives 1 life back and leaves 6
+- ticking down past zero gives back only what was there, and deletes the key
+  (`assert.deepEqual(state.cmdDamage.opp1, {})` or the recipient key gone)
+- crossing 21 logs the lethal line once; 21→22 does not log it again
+- a commander cannot damage its own controller: same state back
+- an unknown recipient, an unknown uid, a non-commander card, and a zero or
+  non-finite delta each return the same state object
+- `remove()` on a commander clears its tallies everywhere
+- `load()` on a save with no `cmdDamage` yields `{}`, not a rejection
+- `commanders()` returns only cards flagged `commander`
+
+`tests/browser.mjs`:
+- with no commander on the table, both ticker rows are empty
+- sending my card to the command zone makes a ticker appear on the
+  opponent's row (my commander damages them) and none on mine
+- `+` four times shows 4 and the opponent's life drops by 4
+- the ticker's name matches the commander card
+- at 21 the ticker carries `.lethal` and the log has the lethal line
+- `−` gives life back
+- undo steps a tick back, life and tally together
+- a reload keeps the tallies

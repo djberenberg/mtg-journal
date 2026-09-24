@@ -227,6 +227,8 @@ try {
 
   // life totals are typeable, at the table: click opens an input, keeps it
   // out of render()'s way, and Enter or Escape ends it
+  check('the life outputs are reachable as buttons and still announce their own updates', (await el('#life-me', "e.getAttribute('role')")) === 'button' && (await el('#life-me', "e.getAttribute('aria-live')")) === 'polite' && (await el('#life-opp', "e.getAttribute('role')")) === 'button' && (await el('#life-opp', "e.getAttribute('aria-live')")) === 'polite', JSON.stringify({ me: await el('#life-me', "e.getAttribute('role')"), live: await el('#life-me', "e.getAttribute('aria-live')") }));
+
   await click('#life-me'); await sleep(50);
   check('clicking my life total swaps it for an input holding the current value', (await el('#life-me', 'e.hidden')) === true && (await el('#life-me + .life-edit', 'e.hidden')) === false && (await el('#life-me + .life-edit', 'e.value')) === '21', JSON.stringify(await el('#life-me + .life-edit', 'e.value')));
   await evalJs(`document.getElementById('life-me').nextElementSibling.value = ''`); await type('31');
@@ -238,15 +240,24 @@ try {
   await key('Escape', 'Escape', 27); await sleep(50); u = await ui();
   check('escape cancels without changing the total', u.me === '31' && (await el('#life-me', 'e.hidden')) === false && (await el('#life-me + .life-edit', 'e.hidden')) === true, u.me);
 
+  // render() must leave a half-typed input alone: open it, type without
+  // committing, then force a render from an unrelated commit elsewhere.
+  await click('#life-me'); await sleep(50);
+  await evalJs(`document.getElementById('life-me').nextElementSibling.value = ''`); await type('77');
+  await click('[data-life="opp"][data-by="1"]'); await sleep(50); u = await ui();
+  check('a render triggered elsewhere leaves an open, half-typed life input alone', u.opp === '15' && (await el('#life-me', 'e.hidden')) === true && (await el('#life-me + .life-edit', 'e.hidden')) === false && (await el('#life-me + .life-edit', 'e.value')) === '77', JSON.stringify({ opp: u.opp, val: await el('#life-me + .life-edit', 'e.value') }));
+  await key('Enter', 'Enter', 13); await sleep(50); u = await ui();
+  check('and it still commits the right value afterwards', u.me === '77' && /my life is now 77/.test(u.log[0]), JSON.stringify({ me: u.me, log: u.log[0] }));
+
   await click('#life-opp'); await sleep(50);
   await evalJs(`document.getElementById('life-opp').nextElementSibling.value = ''`); await type('12');
   await key('Enter', 'Enter', 13); await sleep(50); u = await ui();
-  check('the opponent\'s life total edits the opponent in view, not me', u.opp === '12' && u.me === '31' && /opponent's life is now 12/.test(u.log[0]), JSON.stringify({ opp: u.opp, me: u.me, log: u.log[0] }));
+  check('the opponent\'s life total edits the opponent in view, not me', u.opp === '12' && u.me === '77' && /opponent's life is now 12/.test(u.log[0]), JSON.stringify({ opp: u.opp, me: u.me, log: u.log[0] }));
 
   await click('#undo'); await sleep(80); u = await ui();
-  check('undo brings a typed life back', u.opp === '14' && u.me === '31', JSON.stringify(u));
-  await click('#undo'); await sleep(80); u = await ui();
-  check('and again for the other typed total', u.me === '21' && u.opp === '14', JSON.stringify(u));
+  check('undo brings a typed life back', u.opp === '15' && u.me === '77', JSON.stringify(u));
+  await click('#undo'); await click('#undo'); await click('#undo'); await sleep(80); u = await ui();
+  check('further undos restore the earlier typed total and the plain life-button change', u.me === '21' && u.opp === '14', JSON.stringify(u));
 
   // moves and remove
   await rightClickAt(elvesSel);

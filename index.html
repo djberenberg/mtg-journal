@@ -48,7 +48,7 @@
         <span class="life" role="group" aria-label="This opponent's life">
           <button type="button" data-life="opp" data-by="-5">-5</button>
           <button type="button" data-life="opp" data-by="-1">-1</button>
-          <output id="life-opp" tabindex="0" aria-label="Life total">20</output>
+          <output id="life-opp" tabindex="0" role="button" aria-live="polite" aria-label="Edit this opponent's life total">20</output>
           <input type="number" class="life-edit" aria-label="Life total" hidden>
           <button type="button" data-life="opp" data-by="1">+1</button>
           <button type="button" data-life="opp" data-by="5">+5</button>
@@ -72,7 +72,7 @@
         <span class="life" role="group" aria-label="My life">
           <button type="button" data-life="me" data-by="-5">-5</button>
           <button type="button" data-life="me" data-by="-1">-1</button>
-          <output id="life-me" tabindex="0" aria-label="My life total">20</output>
+          <output id="life-me" tabindex="0" role="button" aria-live="polite" aria-label="Edit my life total">20</output>
           <input type="number" class="life-edit" aria-label="My life total" hidden>
           <button type="button" data-life="me" data-by="1">+1</button>
           <button type="button" data-life="me" data-by="5">+5</button>

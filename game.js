@@ -149,9 +149,9 @@ export function addCard(state, card, owner, zone) {
 export function play(state, uid) {
   const c = find(state, uid);
   if (!c || c.zone !== 'hand') return state;
-  // A save is only mended where its attachment points at nothing, so a card
-  // in hand can still be carrying one; it does not come back out onto the
-  // table wearing it.
+  // The way onto the table is shut as well as the ways off it: whatever a
+  // save was made to say, a card played from hand arrives on nothing and
+  // wearing nothing.
   const from = detachAround(state, uid);
   return isPermanent(c)
     ? say(patch(from, uid, { zone: 'battlefield', tapped: false, counters: [] }), `${who(state, c.owner, 'play')} ${c.name}`)
@@ -260,9 +260,14 @@ export function reorderCard(state, uid, beforeUid) {
     at = rest.findIndex((x) => x.uid === beforeUid);
     if (at < 0 || !beside(rest[at])) return state;
   }
-  // Taken out at i and put back at i is the order it already had.
-  if (at === i) return state;
-  return { ...state, cards: [...rest.slice(0, at), c, ...rest.slice(at)] };
+  // What the table shows is the order of the run, so an order the run
+  // already had is no reorder at all — even when the card has stepped over
+  // something it is never drawn beside, another player's card or the other
+  // row's, which lies between the two in the array and nowhere else.
+  const cards = [...rest.slice(0, at), c, ...rest.slice(at)];
+  const order = (list) => list.filter(beside).map((x) => x.uid).join();
+  if (order(cards) === order(state.cards)) return state;
+  return { ...state, cards };
 }
 
 // The turn passes round the table. The player whose turn begins untaps;
@@ -422,16 +427,18 @@ export function load(json) {
   if (typeof s.startingLife !== 'number') s = { ...s, startingLife: 20 };
   // A save from before commander damage was kept simply has none of it.
   if (!s.cmdDamage || typeof s.cmdDamage !== 'object' || Array.isArray(s.cmdDamage)) s = { ...s, cmdDamage: {} };
-  // An attachment is only ever drawn behind a creature on the battlefield,
-  // so one pointing anywhere else is dropped rather than left to strand the
-  // card behind nothing. Mended, not rejected: a bad pointer is no reason
-  // to throw a whole game away.
+  // An attachment is only ever held by an equipment on the battlefield and
+  // only ever points at a creature on one, so anything else is dropped
+  // rather than left to strand a card: drawn tucked in behind nothing, in
+  // no run to be reordered along, and offered no way off. Mended, not
+  // rejected: a bad pointer is no reason to throw a whole game away.
   return {
     ...s,
     cards: s.cards.map((c) => {
       if (c.attachedTo == null) return c;
       const host = find(s, c.attachedTo);
-      return host?.zone === 'battlefield' && isCreature(host) ? c : detach(c);
+      const ok = isEquipment(c) && c.zone === 'battlefield' && host?.zone === 'battlefield' && isCreature(host);
+      return ok ? c : detach(c);
     }),
   };
 }

@@ -552,6 +552,18 @@ test('a reorder that would cross a row, a player, a zone, or change nothing is n
   assert.equal(reorderCard(h, '7', '1'), h, 'nor is one in hand a neighbour of one on the table');
 });
 
+test('a move past cards it is never drawn beside is no move at all', () => {
+  // Two of my creatures with the opponent's card sitting between them in
+  // the array: the run they are drawn in is the same after as before, so
+  // there is nothing to save and nothing to undo.
+  let g = addCard(newGame(), ELVES, 'me', 'battlefield');
+  g = addCard(g, ELVES, 'opp1', 'battlefield');
+  g = addCard(g, DELVER, 'me', 'battlefield');
+  assert.equal(reorderCard(g, '1', '3'), g, 'already in front of it, whatever lies between');
+  assert.equal(reorderCard(g, '3', null), g, 'already last in its run');
+  assert.notEqual(reorderCard(g, '3', '1'), g, 'and a real move is still a move');
+});
+
 test('a reorder is presentation, like a counter square: no log line', () => {
   const g = board();
   const h = reorderCard(g, '3', '1');
@@ -816,4 +828,16 @@ test('load drops an attachment that points at no creature on the battlefield, an
   assert.equal('attachedTo' in notACreature.cards[0], false, 'a host that is not a creature');
   const itself = strand(g.cards.map((c) => (c.uid === '1' ? { ...c, attachedTo: '1' } : c)));
   assert.equal(itself.cards[0].attachedTo, undefined, 'and one pointing at itself is no creature either');
+});
+
+test('load drops an attachment held by anything but an equipment on the battlefield', () => {
+  const g = equip(armed(), '1', '2');
+  const held = (cards) => load(JSON.stringify({ ...g, cards })).cards[0];
+  assert.equal('attachedTo' in held(g.cards.map((c) => (c.uid === '1' ? { ...c, zone: 'hand' } : c))), false, 'a card in hand is on nothing');
+  assert.equal('attachedTo' in held(g.cards.map((c) => (c.uid === '1' ? { ...c, typeLine: 'Artifact' } : c))), false, 'and so is a card that is no equipment');
+  // A creature wearing an attachment is the same mistake the other way up:
+  // it would draw tucked in behind another card and have no way off.
+  const onACreature = load(JSON.stringify({ ...g, cards: g.cards.map((c) => (c.uid === '3' ? { ...c, attachedTo: '2' } : c)) }));
+  assert.equal('attachedTo' in onACreature.cards[2], false);
+  assert.equal(onACreature.cards[0].attachedTo, '2', 'the real attachment is left alone');
 });

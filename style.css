@@ -22,12 +22,19 @@
   /* How much bigger a card is under the pointer. app.js reads it, to put
      the panel beside the size the card ends at. */
   --card-zoom: 1.06;
+  /* The gap between cards in a battlefield row. An attached equipment is
+     pulled back over its host by a margin, which has to swallow this too. */
+  --row-gap: 0.5rem;
   /* How much of an attached equipment its host covers: two thirds, so the
-     edge that shows is enough to read the art by and to right-click. The
-     second and later ones are covered further, so a creature carrying
-     three of them does not take the whole row. */
+     edge that shows is enough to tell it by and to right-click. A second
+     one is laid over the first, so it has to start clear of the host's
+     edge and covers only --equip-clear of it; from the third on there is
+     no host in the way and they fan tightly, each covering --equip-fan of
+     the one before. Every edge left showing is at least 24px wide, the
+     smallest thing worth asking a finger to hit. */
   --equip-tuck: 0.66;
-  --equip-tuck-more: 0.82;
+  --equip-clear: 0.08;
+  --equip-fan: 0.75;
   --radius: 10px;
 }
 
@@ -428,7 +435,7 @@ h3 { font-size: 0.68rem; }
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  gap: 0.5rem;
+  gap: var(--row-gap);
   min-height: 1.6rem;
   padding: 0.25rem 0.25rem 0.25rem 0.35rem;
   border-radius: 6px;
@@ -485,15 +492,19 @@ h3 { font-size: 0.68rem; }
    pulled back over it, so it reads as tucked in behind rather than standing
    beside: the margin swallows the row's gap along with most of the card's
    width, and what is left showing is enough to tell it by and to right-click.
-   A second one is pulled further still, so a creature carrying several fans
-   them out rather than taking up the row. */
+   Several on one creature fan out to the right rather than stacking deeper:
+   each one is laid over the one before, so a card pulled back further than
+   its neighbour would not peek out from under it but disappear beneath it.
+   The row is still far shorter than the cards standing side by side. */
 .card.attached {
-  margin-left: calc(-0.5rem - var(--card-w) * var(--equip-tuck));
+  margin-left: calc(-1 * var(--row-gap) - var(--card-w) * var(--equip-tuck));
   z-index: 0;
   opacity: 0.85; /* behind its host, and reading as behind it */
 }
 
-.card.attached + .card.attached { margin-left: calc(-0.5rem - var(--card-w) * var(--equip-tuck-more)); }
+/* Clear of the host's edge for the second, tight from the third on. */
+.card.attached + .card.attached { margin-left: calc(-1 * var(--row-gap) - var(--card-w) * var(--equip-clear)); }
+.card.attached + .card.attached + .card.attached { margin-left: calc(-1 * var(--row-gap) - var(--card-w) * var(--equip-fan)); }
 .card.attached:hover { opacity: 1; }
 
 /* A later sibling paints over an earlier one, and the equipment comes after

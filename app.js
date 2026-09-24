@@ -358,11 +358,19 @@ function render() {
     const i = next.get(place) ?? 0;
     next.set(place, i + 1);
     // Tucked in behind its host only where it has really landed behind it:
-    // a host in the other row — an equipment on a land creature — leaves
-    // it an ordinary card in its own. The host carries a class of its own
-    // because it needs a z-index to be drawn over what is tucked in behind.
+    // straight after the host, or after another equipment already tucked in
+    // behind the same card. A host in the other row — an equipment on a land
+    // creature — leaves it an ordinary card in its own row. The host carries
+    // a class of its own because it needs a z-index to be drawn over what is
+    // tucked in behind it; what is tucked in says whose it is, so the next
+    // one along can find the pile it belongs to and a drag can tell what
+    // goes with the card it is carrying.
+    const prev = place.children[i - 1];
+    const tucked = Boolean(c.attachedTo) && (prev?.dataset.uid === c.attachedTo || prev?.dataset.host === c.attachedTo);
     el.classList.toggle('has-equipment', hosts.has(c.uid));
-    el.classList.toggle('attached', Boolean(c.attachedTo) && place.children[i - 1]?.dataset.uid === c.attachedTo);
+    el.classList.toggle('attached', tucked);
+    if (tucked) el.dataset.host = c.attachedTo;
+    else delete el.dataset.host;
     if (place.children[i] !== el) place.insertBefore(el, place.children[i] ?? null);
   }
   // A card that has gone — removed, or another opponent's — leaves the
@@ -958,8 +966,11 @@ table.addEventListener('pointerdown', (e) => {
   const tier = card?.closest('.tier');
   if (!tier) return;
   // An attached equipment sits where its host sits and has no place of its
-  // own in the row, so there is nowhere to carry it to.
-  if (card.classList.contains('attached')) return;
+  // own in the row, so there is nowhere to carry it to. Asked of the game
+  // rather than of the class: an equipment on a land creature is attached
+  // without being drawn tucked in — its host is in the other row — and
+  // reorderCard would refuse the drop it was carried to all the same.
+  if (game.cards.find((x) => x.uid === card.dataset.uid)?.attachedTo) return;
   // Where it came from, to put it back if the drag comes to nothing.
   drag = { card, tier, home: card.nextElementSibling, startX: e.clientX, startY: e.clientY, moved: false };
 });
@@ -988,7 +999,7 @@ function overTier(x, y) {
 // order it will be left in. render() draws in state order, so the commit
 // that follows finds every card already where it belongs and moves nothing.
 function reorderUnder(x, y) {
-  const next = [...drag.tier.children].find((el) => {
+  let next = [...drag.tier.children].find((el) => {
     // A creature and what is tucked in behind it are one thing to drop in
     // front of or behind: the equipment is no place of its own to stop at,
     // and stopping there would put the card somewhere render() would not.
@@ -996,6 +1007,15 @@ function reorderUnder(x, y) {
     const r = el.getBoundingClientRect();
     return y < r.top || (y < r.bottom && x < r.left + r.width / 2); // an earlier row, or this one's near half
   }) ?? null;
+  // Back over whatever is tucked in behind the card being carried, which
+  // goes where it goes: without this a creature picked up and put down
+  // where it was would land after its own equipment, which draws the same
+  // and would still cost an undo step and a save.
+  let back = next ? next.previousElementSibling : drag.tier.lastElementChild;
+  while (back?.dataset.host === drag.card.dataset.uid) {
+    next = back;
+    back = back.previousElementSibling;
+  }
   if (next !== drag.card.nextElementSibling) drag.tier.insertBefore(drag.card, next);
 }
 
@@ -1063,6 +1083,7 @@ function endDrag(keep = true) {
   // The element is already where it was dropped: the card in front of it is
   // the one to go in front of, and nothing after it means the end of the row.
   commit(G.reorderCard(game, card.dataset.uid, card.nextElementSibling?.dataset.uid ?? null));
+  render(); // the commit may be a no-op (the order it already had); draw the row back either way
 }
 
 function onPointerUp(e) {

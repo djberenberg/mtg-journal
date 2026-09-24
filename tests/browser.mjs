@@ -18,7 +18,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 // one saved query for "lightn" and nothing for anything else.
 const fixtures = Object.fromEntries(readdirSync(join(root, 'tests/fixtures')).map((f) => [f.replace('.json', ''), JSON.parse(readFileSync(join(root, 'tests/fixtures', f)))]));
 const parseFixture = (n) => parseCard(fixtures[n]);
-const byName = { 'lightning bolt': 'bolt', bolt: 'bolt', 'llanowar elves': 'elves', elves: 'elves', 'delver of secrets': 'delver', delver: 'delver', forest: 'forest', bonesplitter: 'bonesplitter' };
+const byName = { 'lightning bolt': 'bolt', bolt: 'bolt', 'llanowar elves': 'elves', elves: 'elves', 'delver of secrets': 'delver', delver: 'delver', forest: 'forest', bonesplitter: 'bonesplitter', 'dryad arbor': 'arbor', arbor: 'arbor' };
 const stub = `
   window.__requests = [];
   window.fetch = async (url, init) => {
@@ -26,7 +26,7 @@ const stub = `
     const u = new URL(url);
     const body = (() => {
       if (u.pathname === '/cards/autocomplete') return u.searchParams.get('q').toLowerCase().startsWith('lightn') ? ${JSON.stringify(fixtures.autocomplete)} : { object: 'catalog', data: [] };
-      if (u.pathname === '/cards/named') { const k = ${JSON.stringify(byName)}[u.searchParams.get('fuzzy').toLowerCase()]; return k ? ${JSON.stringify({ bolt: fixtures.bolt, elves: fixtures.elves, delver: fixtures.delver, forest: fixtures.forest, bonesplitter: fixtures.bonesplitter })}[k] : ${JSON.stringify(fixtures.notfound)}; }
+      if (u.pathname === '/cards/named') { const k = ${JSON.stringify(byName)}[u.searchParams.get('fuzzy').toLowerCase()]; return k ? ${JSON.stringify({ bolt: fixtures.bolt, elves: fixtures.elves, delver: fixtures.delver, forest: fixtures.forest, bonesplitter: fixtures.bonesplitter, arbor: fixtures['dryad-arbor'] })}[k] : ${JSON.stringify(fixtures.notfound)}; }
       return { object: 'error', status: 500, details: 'unexpected ' + url };
     })();
     await new Promise((r) => setTimeout(r, 30));
@@ -504,12 +504,32 @@ try {
   // A tucked card is pointed at by the edge of it that shows: its middle is
   // under its host, which is drawn in front of it.
   const showing = async (sel) => {
-    await evalJs(`document.querySelector(${'${JSON.stringify(sel)}'}).scrollIntoView({block:'center'})`);
+    await evalJs(`document.querySelector(${JSON.stringify(sel)}).scrollIntoView({block:'center'})`);
     await sleep(150);
     const r = await cardRect(sel);
     return { x: Math.round(r.right - 6), y: Math.round(r.top + r.height / 2) };
   };
   const pickAtEdge = async (sel, label) => { const p = await showing(sel); await rightClick(p.x, p.y); return pickItem(label); };
+  // Pressed on the edge that shows and carried off across the row to the
+  // empty end of it: a card that may not be moved should never be picked
+  // up, so what comes back is what it was doing mid-drag. Let go where no
+  // card is, so the click the press ends with lands on the row and not on
+  // a card, where it would be the tap and not this drag's business.
+  const dragRefused = async (sel) => {
+    const from = await showing(sel);
+    const row = await centre('.zone[data-owner="me"] .tier[data-tier="spells"]');
+    const to = { x: row.right - 10, y: from.y };
+    await mouse('mousePressed', from.x, from.y);
+    for (let i = 1; i <= 6; i++) await mouse('mouseMoved', Math.round(from.x + ((to.x - from.x) * i) / 6), Math.round(from.y + ((to.y - from.y) * i) / 6));
+    const during = JSON.parse(await evalJs(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});return JSON.stringify({dragging:e.classList.contains('dragging'),moved:e.style.transform!==''})})()`));
+    await mouse('mouseReleased', to.x, to.y, 0);
+    await sleep(150);
+    return during;
+  };
+  // The tucked cards of a row, and how wide an edge each one shows: covered
+  // on the left by its host, which is drawn over it, and on the right by the
+  // next equipment along, which is drawn over that.
+  const fanOf = (tier) => evalJs(`(()=>{const els=[...document.querySelectorAll('.zone[data-owner="me"] .tier[data-tier="${tier}"] .card')];const b=els.map(e=>e.getBoundingClientRect());const out=[];els.forEach((e,i)=>{if(!e.classList.contains('attached'))return;const overLeft=i>0&&!els[i-1].classList.contains('attached')?b[i-1].right:b[i].left;const overRight=els[i+1]?.classList.contains('attached')?b[i+1].left:b[i].right;out.push({uid:e.dataset.uid,host:e.dataset.host,attached:true,left:Math.round(b[i].left),right:Math.round(b[i].right),showing:Math.round(overRight-overLeft)})});return out})()`);
   await toHand('bonesplitter');
   const bonesUid = (await zone('me', 'hand')).find((c) => c.name === 'Bonesplitter').uid;
   const bonesSel = `.card[data-uid="${bonesUid}"]`;
@@ -568,6 +588,50 @@ try {
   check('the host sent to the graveyard takes the equipment off, and the move is the only line about it', !(await tucked(bonesUid)).attached && (await attachedTo(bonesUid)) === undefined && u.log.length === logWas + 1 && /my Llanowar Elves to graveyard/.test(u.log[0]), JSON.stringify({ log: u.log.slice(0, 2), on: await attachedTo(bonesUid) }));
   await click('#undo'); await sleep(200);
   check('undo brings the creature back with the equipment on it again', (await tucked(bonesUid)).attached && (await attachedTo(bonesUid)) === hand[1].uid);
+  // an attached card is not carried, and the creature it is on goes nowhere
+  // by being picked up and put down again
+  let saveWasNow = JSON.stringify(await state());
+  let refused = await dragRefused(bonesSel);
+  check('an attached equipment cannot be picked up at all: never carried, and nothing saved', !refused.dragging && !refused.moved && JSON.stringify(await state()) === saveWasNow, JSON.stringify(refused));
+  await nudge(elvesSel, 8); await sleep(120);
+  tuck = await tucked(bonesUid);
+  check('and the creature it is on, picked up and put back where it was, is no move at all: the row is drawn as it was and nothing is saved', JSON.stringify(await state()) === saveWasNow && tuck.attached && tuck.after === hand[1].uid, JSON.stringify(tuck));
+  await clickAt(elvesSel); await sleep(80); // the drag ate the click; this one taps
+  await clickAt(elvesSel); await sleep(80);
+  check('(the creature is untapped again)', !(await zone('me', 'battlefield')).find((c) => c.uid === hand[1].uid).tapped);
+
+  // several on one creature: a fan, every card of it still worth pointing at
+  await pickAtEdge(bonesSel, 'copy'); await sleep(120);
+  const copy1 = (await rowOf('spells'))[2];
+  await menuPick(`.card[data-uid="${copy1}"]`, 'equip Llanowar Elves'); await sleep(150);
+  let fan = await fanOf('spells');
+  check('a second equipment on one creature is tucked in behind it too, laid over the first and not under it', fan.length === 2 && fan.every((f) => f.attached && f.host === hand[1].uid) && fan[1].left > fan[0].left && fan[1].left < fan[0].right, JSON.stringify(fan));
+  await pickAtEdge(`.card[data-uid="${copy1}"]`, 'copy'); await sleep(120);
+  const copy2 = (await rowOf('spells'))[3];
+  await menuPick(`.card[data-uid="${copy2}"]`, 'equip Llanowar Elves'); await sleep(150);
+  fan = await fanOf('spells');
+  const pile = await evalJs(`(()=>{const c=[...document.querySelectorAll('.zone[data-owner="me"] .tier[data-tier="spells"] .card')];const w=c[0].getBoundingClientRect().width;return Math.round((c[c.length-1].getBoundingClientRect().right-c[0].getBoundingClientRect().left)/w*100)/100})()`);
+  check('a third fans in beside them, and every card of the fan keeps an edge big enough to hit: 24px', fan.length === 3 && fan.every((f) => f.attached && f.host === hand[1].uid && f.showing >= 24) && pile < 4, JSON.stringify({ fan, pile }));
+  await shot('h-fanned');
+  await pickAtEdge(`.card[data-uid="${copy2}"]`, 'remove'); await sleep(100);
+  await pickAtEdge(`.card[data-uid="${copy1}"]`, 'remove'); await sleep(100);
+  check('(the copies are gone, the first is tucked in behind the creature as it was)', (await tucked(bonesUid)).attached && (await rowOf('spells')).length === 2, JSON.stringify(await rowOf('spells')));
+
+  // a land creature is a creature: the equipment goes on it, but in the
+  // other row, where there is nothing to be tucked in behind
+  await toHand('dryad arbor');
+  const arborUid = (await zone('me', 'hand')).find((c) => c.name === 'Dryad Arbor').uid;
+  const arborSel = `.card[data-uid="${arborUid}"]`;
+  await menuPick(arborSel, 'play'); await sleep(120);
+  check('a land creature plays to the lands row and is offered as something to equip', (await rowOf('lands')).join('|') === arborUid && (await pickAtEdge(bonesSel, 'equip Dryad Arbor')) === 'ok', JSON.stringify(await rowOf('lands')));
+  await sleep(150);
+  tuck = await tucked(bonesUid);
+  check('on a host in the other row it stays an ordinary card in its own: attached in the game, tucked in behind nothing', (await attachedTo(bonesUid)) === arborUid && !tuck.attached && tuck.row === 'spells', JSON.stringify(tuck));
+  saveWasNow = JSON.stringify(await state());
+  refused = await dragRefused(bonesSel);
+  check('and it still cannot be carried, though nothing about it says tucked in: the game is asked, not the drawing', !refused.dragging && !refused.moved && JSON.stringify(await state()) === saveWasNow, JSON.stringify(refused));
+  await menuPick(arborSel, 'remove'); await sleep(120);
+  check('removing the land creature takes the equipment off it', (await attachedTo(bonesUid)) === undefined && (await rowOf('lands')).length === 0);
   await pickAtEdge(bonesSel, 'remove'); await sleep(120);
   check('(the equipment is off the table, leaving the row as it was)', (await rowOf('spells')).join('|') === hand[1].uid && (await el(elvesSel, "e.classList.contains('has-equipment')")) === false, JSON.stringify(await zone('me', 'battlefield')));
 

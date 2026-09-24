@@ -503,6 +503,20 @@ try {
   check('a card moved to the hand is neither torn nor warped', (await ghosts()).length === 0 && (await zone('me', 'hand')).length === 1);
   await menuPick(elvesSel, 'to the battlefield'); await sleep(50);
   check('nor is one moved to the battlefield', (await ghosts()).length === 0 && (await zone('me', 'battlefield')).length === 1);
+  // a card that was lying on its side tears as it lay, not squashed into
+  // the landscape box it leaves behind
+  await click(`${elvesSel} img`); await sleep(250); // tapped, and the turn finished
+  await hover(elvesSel); // the pointer stays here for the right-click, so the box below is the one the ghost is made from
+  const lying = await cardRect(elvesSel);
+  await menuPick(elvesSel, 'to the graveyard');
+  const turned = await evalJs(`(()=>{const g=document.querySelector('.ghost');const s=getComputedStyle(g);const r=g.getBoundingClientRect();return {w:Math.round(parseFloat(s.width)),h:Math.round(parseFloat(s.height)),rotate:s.rotate,cx:Math.round(r.left+r.width/2),cy:Math.round(r.top+r.height/2)}})()`);
+  check('a tapped card\'s ghost keeps the card\'s own proportions, turned on its side over the box it left', turned.rotate === '90deg' && turned.h > turned.w && Math.abs(turned.w - lying.height) <= 1 && Math.abs(turned.h - lying.width) <= 1 && Math.abs(turned.cx - (lying.left + lying.width / 2)) <= 1 && Math.abs(turned.cy - (lying.top + lying.height / 2)) <= 1, JSON.stringify({ lying: { w: Math.round(lying.width), h: Math.round(lying.height) }, turned }));
+  await shot('e-tear-tapped');
+  await unhover();
+  await sleep(900);
+  check('and it is gone with the others, leaving the card untapped in the graveyard', (await ghosts()).length === 0 && !(await zone('me', 'graveyard'))[0].tapped);
+  await menuPick(elvesSel, 'to the battlefield'); await sleep(50);
+
   // and with stillness asked for, nothing is thrown across the table at all
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await menuPick(elvesSel, 'to the graveyard');

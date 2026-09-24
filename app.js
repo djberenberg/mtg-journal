@@ -119,6 +119,10 @@ function cardEl(c) {
     cardEls.set(c.uid, el);
   }
   renderCounters(el.querySelector('.counters'), c.counters ?? []);
+  // Read before the line below changes it: a card leaving the battlefield is
+  // untapped on the way out, and the ghost of it should be the card as it
+  // was lying, not as it lands.
+  const wasTurned = el.classList.contains('tapped');
   el.classList.toggle('tapped', c.tapped);
   el.classList.toggle('permanent', G.isPermanent(c));
   el.classList.toggle('commander', Boolean(c.commander));
@@ -131,7 +135,7 @@ function cardEl(c) {
     const rect = from && el.isConnected ? el.getBoundingClientRect() : null;
     el.dataset.zone = c.zone;
     el.setAttribute('aria-label', `${c.name}, ${c.zone}`);
-    if (rect?.width) zoneEffect(el, rect, from, c.zone);
+    if (rect?.width) zoneEffect(el, rect, from, c.zone, wasTurned);
   }
   return el;
 }
@@ -147,27 +151,27 @@ const EFFECTS = { graveyard: { effect: 'tear', ms: 620 }, exile: { effect: 'warp
 const ARRIVE_MS = 200;
 const stillness = matchMedia('(prefers-reduced-motion: reduce)');
 
-function zoneEffect(el, rect, from, to) {
+function zoneEffect(el, rect, from, to, turned) {
   // A card arriving on the table for the first time was never anywhere to
   // leave: an opponent's instant, cast straight into their graveyard, does
   // not tear. One played from hand that resolves there does.
   if (!from || !EFFECTS[to]) return;
-  if (!stillness.matches) ghost(el, rect, EFFECTS[to]);
+  if (!stillness.matches) ghost(el, rect, EFFECTS[to], turned);
   arrive(el);
 }
 
 // The card element itself is never animated: render() is moving it into its
 // new zone in this same frame, and animating it would fight the layout.
 // What plays is a throwaway copy, fixed over the table where the card was.
-function ghost(el, rect, { effect, ms }) {
+function ghost(el, rect, { effect, ms }, turned) {
   const src = el.querySelector('img').src;
   const g = document.createElement('div');
   g.className = 'ghost';
   g.dataset.effect = effect;
   g.ariaHidden = 'true';
-  // A tapped card lies on its side, so the box it leaves is the card's
-  // turned over; the ghost is the upright card, turned the same way.
-  const turned = el.classList.contains('tapped');
+  // A card that was lying on its side left a box that is the card's turned
+  // over; the ghost is the upright card, turned the same way, so the art is
+  // not squashed into a shape it never had.
   const w = turned ? rect.height : rect.width;
   const h = turned ? rect.width : rect.height;
   g.style.left = `${rect.left + (rect.width - w) / 2}px`;

@@ -554,6 +554,10 @@ h3 { font-size: 0.68rem; }
    while it ran and hand it back with a jolt at the end. */
 .card.arriving img { animation: card-arrive 0.2s ease-out both; }
 
+/* There is no "to": the end of it is whatever transform the image already
+   has, which is none. That holds only because a card never arrives tapped
+   — moveTo untaps whatever it moves — and a tapped one would turn its 90
+   degrees over these 0.2s instead of simply growing. */
 @keyframes card-arrive {
   from { transform: scale(0.92); opacity: 0; }
 }

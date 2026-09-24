@@ -354,6 +354,42 @@ h3 { font-size: 0.68rem; }
 
 .life-edit[hidden] { display: none; }
 
+/* Commander damage: one small ticker per commander that could be hitting
+   this side. With one opponent and one commander each that is a single
+   group under the life total, so it stays quiet until it matters; with no
+   commander on the table the row is not there at all, gap and all. */
+.cmd-dmg { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.cmd-dmg:empty { display: none; }
+
+.ticker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.15rem 0.1rem 0.45rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.ticker .cmd-name { max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ticker .n { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.ticker button {
+  padding: 0 0.3rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: transparent;
+}
+
+.ticker button:hover:not(:disabled) { background: var(--raised); }
+
+/* Twenty-one is lethal: it should read from across the table. */
+.ticker.lethal { color: var(--danger); border-color: var(--danger); }
+.ticker.lethal .n { color: var(--danger); }
+
 .zone {
   --card-h: calc(var(--card-w) * 680 / 488);
   display: flex;

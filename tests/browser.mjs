@@ -107,6 +107,7 @@ try {
   const menuItems = () => evalJs(`[...document.getElementById('menu').children].map(c=>c.tagName==='HR'?'-':c.textContent).join('|')`);
   const menuRect = () => evalJs(`document.getElementById('menu').getBoundingClientRect().toJSON()`);
   const cardRect = (sel) => evalJs(`document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect().toJSON()`);
+  const tickers = (side) => evalJs(`[...document.querySelectorAll('#cmd-dmg-${side} .ticker')].map(t=>({uid:t.dataset.uid, name:t.querySelector('.cmd-name').textContent, title:t.querySelector('.cmd-name').title, n:t.querySelector('.n').textContent, lethal:t.classList.contains('lethal'), labels:[...t.querySelectorAll('button')].map(b=>b.getAttribute('aria-label'))}))`);
   const oppUi = () => evalJs(`({name: document.getElementById('opp-name').textContent, life: document.getElementById('life-opp').textContent, tabsHidden: document.getElementById('opp-tabs').hidden, tabs: [...document.querySelectorAll('#opp-tabs button')].map(b=>({text:b.textContent, selected:b.getAttribute('aria-selected')==='true', active:b.classList.contains('active')}))})`);
 
   let u = await ui();
@@ -119,6 +120,7 @@ try {
   check('nothing is staged to begin with: the slot is away', st.hidden, JSON.stringify(st));
   check('the opponent\'s hand pile is hidden while empty', await evalJs(`document.querySelector('[data-pile="opp:hand"]').hidden`));
   check('both sides have a command zone', (await evalJs(`document.querySelectorAll('.zone[data-zone="command"]').length`)) === 2);
+  check('with no commander on the table, both commander damage rows are empty and take no room', (await tickers('me')).length === 0 && (await tickers('opp')).length === 0 && (await el('#cmd-dmg-me', 'getComputedStyle(e).display')) === 'none' && (await el('#cmd-dmg-opp', 'getComputedStyle(e).display')) === 'none');
 
   // the log collapses and the table takes the room
   const tableBefore = await width('.table');
@@ -284,6 +286,8 @@ try {
   // the command zone
   await menuPick(elvesSel, 'to the command zone'); await sleep(50);
   check('a card can be sent to my command zone, where it wears the commander mark', (await zone('me', 'command')).length === 1 && (await el(`.card[data-uid="${hand[1].uid}"]`, "e.classList.contains('commander')")) && /my Llanowar Elves to command zone/.test((await ui()).log[0]));
+  let tk = await tickers('opp');
+  check('my commander gives the opponent a ticker of its own, at nothing, and me none', tk.length === 1 && tk[0].uid === hand[1].uid && tk[0].name === 'Llanowar Elves' && tk[0].title === 'Llanowar Elves' && tk[0].n === '0' && !tk[0].lethal && (await tickers('me')).length === 0, JSON.stringify(tk));
   await menuPick(elvesSel, 'to the battlefield'); await sleep(50);
   check('cast from the command zone, it keeps the mark on the battlefield', (await zone('me', 'battlefield')).length === 1 && (await el(`.card[data-uid="${hand[1].uid}"]`, "e.classList.contains('commander')")));
   await menuPick(elvesSel, 'to the command zone'); await sleep(50);
@@ -562,6 +566,46 @@ try {
   st = await stagedUi();
   check('the box keeps the text for fixing, and nothing is staged', u.q === 'xyzzyplugh' && st.hidden, JSON.stringify(st));
   await evalJs(`document.getElementById('q').value=''`);
+
+
+  // commander damage: a ticker per commander, under the life total
+  const tickBtn = (side, uid, n) => click(`#cmd-dmg-${side} .ticker[data-uid="${uid}"] button[data-cmd="${n}"]`);
+  const tickMany = (side, uid, n, times) => evalJs(`(()=>{for(let i=0;i<${times};i++){const b=document.querySelector('#cmd-dmg-${side} .ticker[data-uid="${uid}"] button[data-cmd="${n}"]');if(!b)return 'missing';b.click()}return 'ok'})()`);
+  const oppLife = () => evalJs(`Number(document.getElementById('life-opp').textContent)`);
+  tk = await tickers('opp');
+  const cmdUid = tk[0]?.uid;
+  check('my commander is still the opponent\'s only ticker, and it is named and labelled', tk.length === 1 && tk[0].name === 'Llanowar Elves' && tk[0].n === '0' && tk[0].labels.join('|') === 'One fewer from Llanowar Elves|One more from Llanowar Elves', JSON.stringify(tk));
+  const lifeWas = await oppLife();
+  await tickMany('opp', cmdUid, 1, 4); await sleep(80); tk = await tickers('opp'); u = await ui();
+  check('+ four times: the tally reads 4 and the same four life are gone, in one line each', tk[0].n === '4' && (await oppLife()) === lifeWas - 4 && u.log[0] === `${(await state()).turn} opponent's 1 from Llanowar Elves (4), ${lifeWas - 4} life`, JSON.stringify({ tk, life: await oppLife(), log: u.log[0] }));
+  await tickBtn('opp', cmdUid, -1); await sleep(80); tk = await tickers('opp'); u = await ui();
+  check('− is a correction: the tally drops to 3 and the life comes back', tk[0].n === '3' && (await oppLife()) === lifeWas - 3 && /opponent's −1 from Llanowar Elves \(3\)/.test(u.log[0]), JSON.stringify({ n: tk[0].n, life: await oppLife(), log: u.log[0] }));
+  await click('#undo'); await sleep(80); tk = await tickers('opp');
+  check('undo steps one tick back, tally and life together', tk[0].n === '4' && (await oppLife()) === lifeWas - 4, JSON.stringify({ n: tk[0].n, life: await oppLife() }));
+  await send('Page.navigate', { url: `${BASE}/` }); await sleep(800); tk = await tickers('opp');
+  check('a reload keeps the tallies', tk.length === 1 && tk[0].n === '4' && (await oppLife()) === lifeWas - 4, JSON.stringify(tk));
+  await evalJs(`document.querySelector('#cmd-dmg-opp .ticker button[data-cmd="1"]').focus()`);
+  await tickBtn('opp', cmdUid, 1); await sleep(80);
+  check('the ticker keeps its buttons across the commit, so the keyboard does not lose its place', (await evalJs(`document.activeElement.getAttribute('aria-label')`)) === 'One more from Llanowar Elves');
+  await tickMany('opp', cmdUid, 1, 16); await sleep(120); tk = await tickers('opp'); u = await ui();
+  check('at 21 the ticker turns lethal and the log says so, once', tk[0].n === '21' && tk[0].lethal && /opponent is dead to Llanowar Elves's commander damage \(21\)/.test(u.log[0]) && u.log.filter((l) => /dead to/.test(l)).length === 1, JSON.stringify({ n: tk[0].n, lethal: tk[0].lethal, log: u.log.slice(0, 2) }));
+  await shot('d-commander-damage');
+  await tickBtn('opp', cmdUid, 1); await sleep(80); tk = await tickers('opp'); u = await ui();
+  check('and 21 to 22 does not say it again', tk[0].n === '22' && tk[0].lethal && u.log.filter((l) => /dead to/.test(l)).length === 1, JSON.stringify({ n: tk[0].n, log: u.log[0] }));
+  check('my own row is still empty: no opponent has a commander yet', (await tickers('me')).length === 0);
+  await stage('forest');
+  await menuPick('#staged', "send to opponent's command zone"); await sleep(80);
+  tk = await tickers('me');
+  check('their commander gives me a ticker, while their row still shows only mine', tk.length === 1 && tk[0].name === 'Forest' && tk[0].n === '0' && (await tickers('opp')).map((t) => t.name).join('|') === 'Llanowar Elves', JSON.stringify(tk));
+  await tickMany('me', (await tickers('me'))[0].uid, 1, 3); await sleep(80); u = await ui();
+  const myLife = await evalJs(`Number(document.getElementById('life-me').textContent)`);
+  check('my row takes my life, not theirs', (await tickers('me'))[0].n === '3' && new RegExp(`my 1 from Forest \\(3\\), ${myLife} life`).test(u.log[0]), JSON.stringify({ me: myLife, log: u.log[0] }));
+  await menuPick(`.card[data-uid="${(await tickers('me'))[0].uid}"]`, 'remove'); await sleep(80);
+  check('removing a commander takes its ticker with it, the life it took standing', (await tickers('me')).length === 0 && (await evalJs(`Number(document.getElementById('life-me').textContent)`)) === myLife, JSON.stringify(await tickers('me')));
+  await click('#undo'); await sleep(80);
+  check('undo brings the card and its ticker back', (await tickers('me')).length === 1 && (await tickers('me'))[0].n === '3');
+  // and off the table again, so what follows counts the cards it expects
+  await menuPick(`.card[data-uid="${(await tickers('me'))[0].uid}"]`, 'remove'); await sleep(80);
 
   // the navbar's game menu
   await clickAt('#menu-game');

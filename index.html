@@ -54,6 +54,9 @@
           <button type="button" data-life="opp" data-by="5">+5</button>
         </span>
       </h2>
+      <!-- One ticker per commander that can hit this side; render() fills
+           the row, and it is away until there is one. -->
+      <div class="cmd-dmg" id="cmd-dmg-opp" data-side="opp" role="group" aria-label="Commander damage to this opponent"></div>
       <div class="zone battlefield" data-owner="opp" data-zone="battlefield" aria-label="Opponent's battlefield">
         <div class="tier" data-tier="lands" aria-label="Opponent's lands"></div>
         <div class="tier" data-tier="spells" aria-label="Opponent's other permanents"></div>
@@ -78,6 +81,7 @@
           <button type="button" data-life="me" data-by="5">+5</button>
         </span>
       </h2>
+      <div class="cmd-dmg" id="cmd-dmg-me" data-side="me" role="group" aria-label="Commander damage to me"></div>
       <div class="zone battlefield" data-owner="me" data-zone="battlefield" aria-label="My battlefield">
         <div class="tier" data-tier="spells" aria-label="My other permanents"></div>
         <div class="tier" data-tier="lands" aria-label="My lands"></div>

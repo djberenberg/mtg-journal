@@ -244,6 +244,44 @@ function renderCounters(layer, counters) {
   for (const sq of [...layer.children]) if (!seen.has(sq.dataset.cid)) sq.remove();
 }
 
+// The row of tickers under a life total: one per commander that could be
+// hitting this side — anyone's but their own, mine included on their row.
+// The elements are kept and their numbers updated, as the counters are, so
+// pressing + does not pull the button out from under the pointer.
+function renderCmdDamage(side, recipient) {
+  const row = $(`cmd-dmg-${side}`);
+  const seen = new Set();
+  let i = 0;
+  for (const c of G.commanders(game)) {
+    if (c.owner === recipient) continue; // it deals none to its own controller
+    seen.add(c.uid);
+    let t = row.querySelector(`[data-uid="${c.uid}"]`);
+    if (!t) {
+      t = document.createElement('span');
+      t.className = 'ticker';
+      t.dataset.uid = c.uid;
+      t.role = 'group';
+      t.setAttribute('aria-label', c.name);
+      t.innerHTML = '<span class="cmd-name"></span><span class="n"></span><button type="button" data-cmd="-1">−</button><button type="button" data-cmd="1">+</button>';
+      const name = t.querySelector('.cmd-name');
+      name.textContent = c.name;
+      name.title = c.name; // the box truncates it
+      // Named one by one rather than built into the markup: a card name is
+      // Scryfall's text, and some of them carry quotes.
+      t.querySelector('[data-cmd="-1"]').setAttribute('aria-label', `One fewer from ${c.name}`);
+      t.querySelector('[data-cmd="1"]').setAttribute('aria-label', `One more from ${c.name}`);
+    }
+    if (row.children[i] !== t) row.insertBefore(t, row.children[i] ?? null);
+    i += 1;
+    const tally = game.cmdDamage?.[recipient]?.[c.uid] ?? 0;
+    t.querySelector('.n').textContent = tally;
+    // Twenty-one from one commander is lethal, and says so across the table.
+    t.classList.toggle('lethal', tally >= 21);
+    t.title = `${tally} commander damage from ${c.name}${tally >= 21 ? ': lethal' : ''}`;
+  }
+  for (const t of [...row.children]) if (!seen.has(t.dataset.uid)) t.remove();
+}
+
 // The section for the opponent in view: their tabs, name, and life.
 function renderOpponents() {
   const seats = G.players(game).slice(1);
@@ -264,6 +302,7 @@ function renderOpponents() {
   // Not while its input is open: a typed-but-uncommitted total would be
   // overwritten out from under the player.
   if (lifeEditing !== 'opp') $('life-opp').textContent = game.life[view.opp];
+  renderCmdDamage('opp', view.opp);
 }
 
 function render() {
@@ -313,6 +352,7 @@ function render() {
   document.querySelector('[data-pile="opp:hand"]').hidden = G.cardsIn(game, view.opp, 'hand').length === 0;
 
   if (lifeEditing !== 'me') $('life-me').textContent = game.life.me;
+  renderCmdDamage('me', 'me');
   $('turn').textContent = `turn ${game.turn} · ${G.label(game, game.active, 'possessive')} turn`;
   undoBtn.disabled = history.length === 0;
 
@@ -850,6 +890,12 @@ table.addEventListener('click', (e) => {
   if (btn?.dataset.opp) { show(btn.dataset.opp); return; }
   if (btn?.dataset.life) {
     commit(G.adjustLife(game, btn.dataset.life === 'me' ? 'me' : view.opp, Number(btn.dataset.by)));
+    return;
+  }
+  // A tick of commander damage is a hit: game.js takes the life with it.
+  if (btn?.dataset.cmd) {
+    const row = btn.closest('.cmd-dmg');
+    commit(G.adjustCommanderDamage(game, row.dataset.side === 'me' ? 'me' : view.opp, btn.closest('.ticker').dataset.uid, Number(btn.dataset.cmd)));
     return;
   }
   // Everything else a card can do is in its menu; a left click on one is

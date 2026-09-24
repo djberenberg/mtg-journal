@@ -8,6 +8,7 @@ import {
   newGame, addCard, play, toggleTap, moveTo, remove, nextTurn, adjustLife, setLife,
   isPermanent, cardsIn, load, players, label, setOpponents, MAX_OPPONENTS, resetGame,
   parseCounterKind, addCounter, adjustCounter, moveCounter, isLand, copyCard,
+  commanders, adjustCommanderDamage,
 } from '../game.js';
 
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url)));
@@ -501,4 +502,119 @@ test('copyCard works in any zone, and ignores an unknown uid', () => {
   g = copyCard(g, only(g, 'me', 'hand').uid);
   assert.equal(cardsIn(g, 'me', 'hand').length, 2);
   assert.equal(copyCard(g, 'nope'), g);
+});
+
+// --- commander damage ----------------------------------------------------
+
+// My Llanowar Elves in the command zone, and the uid it is tracked by.
+const withCommander = (opponents = 1) => {
+  const g = addCard(newGame({ opponents }), ELVES, 'me', 'command');
+  return [g, only(g, 'me', 'command').uid];
+};
+
+test('commanders: only the cards that have been in a command zone', () => {
+  let g = addCard(newGame(), BOLT, 'me');
+  assert.deepEqual(commanders(g), []);
+  g = addCard(g, ELVES, 'me', 'command');
+  g = addCard(g, FOREST, 'opp1', 'command');
+  assert.deepEqual(commanders(g).map((c) => c.name), ['Llanowar Elves', 'Forest']);
+  g = moveTo(g, only(g, 'me', 'command').uid, 'battlefield');
+  assert.equal(commanders(g).length, 2, 'cast, it is still the commander');
+});
+
+test('commander damage ticks up and takes the life with it', () => {
+  const [g0, uid] = withCommander();
+  let g = adjustCommanderDamage(g0, 'opp1', uid, 4);
+  assert.deepEqual(g.cmdDamage.opp1, { [uid]: 4 });
+  assert.equal(g.life.opp1, 16);
+  assert.equal(last(g).text, "opponent's 4 from Llanowar Elves (4), 16 life");
+
+  g = adjustCommanderDamage(g, 'opp1', uid, 3);
+  assert.equal(g.cmdDamage.opp1[uid], 7);
+  assert.equal(g.life.opp1, 13);
+  assert.equal(last(g).text, "opponent's 3 from Llanowar Elves (7), 13 life");
+  assert.equal(g.life.me, 20, 'nobody else is touched');
+});
+
+test('a correction gives back only what was applied, and zero is no entry at all', () => {
+  const [g0, uid] = withCommander();
+  let g = adjustCommanderDamage(g0, 'opp1', uid, 7);
+  g = adjustCommanderDamage(g, 'opp1', uid, -1);
+  assert.equal(g.cmdDamage.opp1[uid], 6);
+  assert.equal(g.life.opp1, 14);
+  assert.equal(last(g).text, "opponent's \u22121 from Llanowar Elves (6), 14 life");
+
+  g = adjustCommanderDamage(g, 'opp1', uid, -10);
+  assert.deepEqual(g.cmdDamage.opp1, {}, 'a tally of zero is deleted, not written');
+  assert.equal(g.life.opp1, 20, 'six back, not ten');
+  assert.equal(last(g).text, "opponent's \u22126 from Llanowar Elves (0), 20 life");
+  assert.equal(adjustCommanderDamage(g, 'opp1', uid, -1), g, 'nothing left to take back');
+});
+
+test('twenty-one is lethal, and said once: on the crossing', () => {
+  const [g0, uid] = withCommander();
+  let g = adjustCommanderDamage(g0, 'opp1', uid, 20);
+  assert.equal(g.log.filter((l) => /dead to/.test(l.text)).length, 0);
+  g = adjustCommanderDamage(g, 'opp1', uid, 1);
+  assert.equal(last(g).text, "opponent is dead to Llanowar Elves's commander damage (21)");
+  assert.equal(g.log.at(-2).text, "opponent's 1 from Llanowar Elves (21), -1 life");
+  g = adjustCommanderDamage(g, 'opp1', uid, 1);
+  assert.equal(g.log.filter((l) => /dead to/.test(l.text)).length, 1, '21 to 22 is not news');
+});
+
+test('the lethal line is in the first person when it is me', () => {
+  let g = addCard(newGame(), ELVES, 'opp1', 'command');
+  const uid = only(g, 'opp1', 'command').uid;
+  g = adjustCommanderDamage(g, 'me', uid, 21);
+  assert.equal(g.log.at(-2).text, 'my 21 from Llanowar Elves (21), -1 life');
+  assert.equal(last(g).text, "I am dead to Llanowar Elves's commander damage (21)");
+});
+
+test('with several opponents the line names the one who took it', () => {
+  const [g0, uid] = withCommander(2);
+  const g = adjustCommanderDamage(g0, 'opp2', uid, 4);
+  assert.equal(last(g).text, "opponent 2's 4 from Llanowar Elves (4), 16 life");
+  assert.deepEqual(Object.keys(g.cmdDamage), ['opp2']);
+});
+
+test('a commander deals no commander damage to its own controller, and nothing else does any', () => {
+  const [g, uid] = withCommander();
+  const plain = addCard(g, BOLT, 'me');
+  assert.equal(adjustCommanderDamage(g, 'me', uid, 3), g, 'not to the player it belongs to');
+  assert.equal(adjustCommanderDamage(g, 'opp2', uid, 3), g, 'nobody is in that seat');
+  assert.equal(adjustCommanderDamage(g, 'opp1', 'nope', 3), g, 'no such card');
+  assert.equal(adjustCommanderDamage(plain, 'opp1', only(plain, 'me', 'hand').uid, 3), plain, 'not a commander');
+  for (const delta of [0, NaN, Infinity, 'x', null, undefined, 0.4]) {
+    assert.equal(adjustCommanderDamage(g, 'opp1', uid, delta), g, String(delta));
+  }
+});
+
+test('removing a commander clears its tallies everywhere', () => {
+  const [g0, uid] = withCommander(2);
+  let g = adjustCommanderDamage(adjustCommanderDamage(g0, 'opp1', uid, 4), 'opp2', uid, 6);
+  g = remove(g, uid);
+  assert.deepEqual(g.cmdDamage, { opp1: {}, opp2: {} });
+  assert.equal(g.life.opp1, 16, 'the life it took stands: it was taken');
+});
+
+test('unseating an opponent takes their tallies with them', () => {
+  const [g0, uid] = withCommander(2);
+  let g = adjustCommanderDamage(g0, 'opp2', uid, 4);
+  g = setOpponents(g, 1);
+  assert.deepEqual(g.cmdDamage, {});
+});
+
+test('a new game and a reset start at no commander damage', () => {
+  const [g0, uid] = withCommander();
+  const g = adjustCommanderDamage(g0, 'opp1', uid, 4);
+  assert.deepEqual(newGame().cmdDamage, {});
+  assert.deepEqual(resetGame(g).cmdDamage, {});
+});
+
+test('a save from before commander damage opens without it, not rejected', () => {
+  const [g0, uid] = withCommander();
+  const g = adjustCommanderDamage(g0, 'opp1', uid, 4);
+  assert.deepEqual(load(JSON.stringify(g)), g, 'and one with it comes back as it was');
+  const { cmdDamage, ...old } = g;
+  assert.deepEqual(load(JSON.stringify(old)), { ...old, cmdDamage: {} });
 });

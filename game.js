@@ -8,6 +8,7 @@
 //   opponents,             how many are seated, 1 to MAX_OPPONENTS
 //   startingLife,          what a newly seated opponent starts at
 //   life: { me, opp1, ... },
+//   cmdDamage: { recipient: { commanderUid: n } },  absent means none
 //   cards: [instance],     every card on the table, in the order added
 //   log: [{ turn, text }],
 //   nextUid,
@@ -78,6 +79,7 @@ export function newGame({ opponents = 1, life = 20 } = {}) {
     opponents: n,
     startingLife: total,
     life: Object.fromEntries(seats.map((p) => [p, total])),
+    cmdDamage: {},
     cards: [],
     log: [],
     nextUid: 1,
@@ -101,6 +103,9 @@ export function setOpponents(state, n) {
   const next = { ...state, opponents: count };
   const seats = players(next);
   next.life = Object.fromEntries(seats.map((p) => [p, state.life[p] ?? state.startingLife]));
+  // An empty seat keeps nothing: were it filled again it would be a new
+  // player, not the one who took that commander damage.
+  next.cmdDamage = Object.fromEntries(seats.filter((p) => state.cmdDamage?.[p]).map((p) => [p, state.cmdDamage[p]]));
   if (!seats.includes(state.active)) next.active = 'me';
   return say(next, `${count} opponent${count === 1 ? '' : 's'} at the table`);
 }
@@ -150,7 +155,14 @@ export function moveTo(state, uid, zone) {
 export function remove(state, uid) {
   const c = find(state, uid);
   if (!c) return state;
-  return say({ ...state, cards: state.cards.filter((x) => x.uid !== uid) }, `${who(state, c.owner, 'remove')} ${c.name}`);
+  const next = { ...state, cards: state.cards.filter((x) => x.uid !== uid) };
+  // The card was never there, so neither was the damage it dealt: a tally
+  // must not outlive the commander it is counted from.
+  if (c.commander) {
+    next.cmdDamage = Object.fromEntries(Object.entries(state.cmdDamage ?? {})
+      .map(([p, tallies]) => [p, Object.fromEntries(Object.entries(tallies).filter(([id]) => id !== uid))]));
+  }
+  return say(next, `${who(state, c.owner, 'remove')} ${c.name}`);
 }
 
 // Another of the same card, right beside the original: a token copy, a
@@ -197,6 +209,49 @@ export function setLife(state, player, value) {
   if (rounded === state.life[player]) return state;
   const life = { ...state.life, [player]: rounded };
   return say({ ...state, life }, `${label(state, player, 'possessive')} life is now ${rounded}`);
+}
+
+// --- commander damage -------------------------------------------------
+
+// Every card that has been in a command zone, in the order they arrived.
+export const commanders = (state) => state.cards.filter((c) => c.commander);
+
+// Twenty-one from one commander is lethal, so the tally is kept per card
+// and not per player: partners each hit for their own.
+//
+// The damage takes the life with it, in the one action: that is what
+// happens at the table, and a journal that made you enter the hit twice
+// would be worse than the paper it replaces. A correction gives back only
+// what was applied, so pulling a tally of 3 down by 5 returns 3 life.
+export function adjustCommanderDamage(state, recipient, commanderUid, delta) {
+  const n = Math.round(Number(delta));
+  const c = find(state, commanderUid);
+  if (!players(state).includes(recipient) || !Number.isFinite(n) || n === 0) return state;
+  // A commander deals no commander damage to the player it belongs to.
+  if (!c?.commander || c.owner === recipient) return state;
+
+  const tallies = state.cmdDamage?.[recipient] ?? {};
+  const was = tallies[commanderUid] ?? 0;
+  const now = Math.max(0, was + n);
+  if (now === was) return state;
+  // Zero is written as nothing at all, so a save does not grow an entry
+  // for every pair at the table.
+  const next = { ...tallies };
+  if (now === 0) delete next[commanderUid];
+  else next[commanderUid] = now;
+
+  const applied = now - was;
+  const life = { ...state.life, [recipient]: state.life[recipient] - applied };
+  const amount = applied > 0 ? `${applied}` : `−${-applied}`;
+  let out = say(
+    { ...state, cmdDamage: { ...state.cmdDamage, [recipient]: next }, life },
+    `${label(state, recipient, 'possessive')} ${amount} from ${c.name} (${now}), ${life[recipient]} life`,
+  );
+  // Only on the crossing: 21 to 22 is not news.
+  if (now >= 21 && was < 21) {
+    out = say(out, `${label(state, recipient)} ${recipient === 'me' ? 'am' : 'is'} dead to ${c.name}'s commander damage (21)`);
+  }
+  return out;
 }
 
 // --- counters ---------------------------------------------------------
@@ -276,5 +331,7 @@ export function load(json) {
   const seats = players(s);
   if (!seats.includes(s.active) || !s.life || seats.some((p) => typeof s.life[p] !== 'number')) return null;
   if (typeof s.startingLife !== 'number') s = { ...s, startingLife: 20 };
+  // A save from before commander damage was kept simply has none of it.
+  if (!s.cmdDamage || typeof s.cmdDamage !== 'object') s = { ...s, cmdDamage: {} };
   return s;
 }

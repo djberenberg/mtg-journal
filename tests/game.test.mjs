@@ -8,7 +8,7 @@ import {
   newGame, addCard, play, toggleTap, moveTo, remove, nextTurn, adjustLife, setLife,
   isPermanent, cardsIn, load, players, label, setOpponents, MAX_OPPONENTS, resetGame,
   parseCounterKind, addCounter, adjustCounter, moveCounter, isLand, copyCard,
-  commanders, adjustCommanderDamage,
+  commanders, adjustCommanderDamage, reorderCard,
 } from '../game.js';
 
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url)));
@@ -502,6 +502,62 @@ test('copyCard works in any zone, and ignores an unknown uid', () => {
   g = copyCard(g, only(g, 'me', 'hand').uid);
   assert.equal(cardsIn(g, 'me', 'hand').length, 2);
   assert.equal(copyCard(g, 'nope'), g);
+});
+
+// --- the order on the table ----------------------------------------------
+
+// Three of my creatures and two of my lands on the battlefield, and one of
+// the opponent's creatures, so every row a reorder must leave alone is
+// there to be left alone. The uids are '1' to '6' in that order.
+const board = () => {
+  let g = newGame();
+  for (const c of [ELVES, DELVER, ELVES, FOREST, FOREST]) g = addCard(g, c, 'me', 'battlefield');
+  return addCard(g, ELVES, 'opp1', 'battlefield');
+};
+const run = (g, owner, lands) => cardsIn(g, owner, 'battlefield').filter((c) => isLand(c) === lands).map((c) => c.uid).join('');
+
+test('reorderCard moves a card in front of a named neighbour in its own row', () => {
+  const g = reorderCard(board(), '3', '1');
+  assert.equal(run(g, 'me', false), '312');
+  assert.equal(run(g, 'me', true), '45', 'my lands are where they were');
+  assert.equal(run(g, 'opp1', false), '6');
+  assert.deepEqual(g.cards.map((c) => c.uid), ['3', '1', '2', '4', '5', '6']);
+});
+
+test('with no card to go in front of, it goes last in its own row and no further', () => {
+  const g = reorderCard(board(), '1', null);
+  assert.equal(run(g, 'me', false), '231');
+  assert.equal(run(g, 'me', true), '45');
+  assert.equal(run(g, 'opp1', false), '6');
+  // Not the end of the whole array: that would look the same and churn the save.
+  assert.deepEqual(g.cards.map((c) => c.uid), ['2', '3', '1', '4', '5', '6']);
+  assert.equal(run(reorderCard(board(), '4', null), 'me', true), '54', 'the lands row reorders on its own');
+});
+
+test('a reorder that would cross a row, a player, a zone, or change nothing is no reorder at all', () => {
+  const g = board();
+  assert.equal(reorderCard(g, 'nope', '1'), g, 'an unknown card');
+  assert.equal(reorderCard(g, '1', 'nope'), g, 'an unknown neighbour');
+  assert.equal(reorderCard(g, '1', '1'), g, 'in front of itself');
+  assert.equal(reorderCard(g, '4', '1'), g, 'a land into the spells row');
+  assert.equal(reorderCard(g, '1', '4'), g, 'a spell into the lands row');
+  assert.equal(reorderCard(g, '1', '6'), g, 'into another player\'s row');
+  assert.equal(reorderCard(g, '1', '2'), g, 'already in front of it');
+  assert.equal(reorderCard(g, '3', null), g, 'already last in its row');
+  assert.equal(reorderCard(g, '6', null), g, 'the only card in its row');
+  const h = addCard(addCard(g, BOLT, 'me'), BOLT, 'me');
+  assert.equal(reorderCard(h, '7', '8'), h, 'a hand is not the battlefield');
+  assert.equal(reorderCard(h, '7', null), h);
+  assert.equal(reorderCard(h, '7', '1'), h, 'nor is one in hand a neighbour of one on the table');
+});
+
+test('a reorder is presentation, like a counter square: no log line', () => {
+  const g = board();
+  const h = reorderCard(g, '3', '1');
+  assert.notEqual(h, g);
+  assert.equal(h.log.length, g.log.length);
+  assert.deepEqual(g.cards.map((c) => c.uid), ['1', '2', '3', '4', '5', '6'], 'and the state it came from is untouched');
+  assert.deepEqual(load(JSON.stringify(h)), h, 'a reordered game saves and loads');
 });
 
 // --- commander damage ----------------------------------------------------

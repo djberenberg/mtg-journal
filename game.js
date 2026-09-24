@@ -179,6 +179,38 @@ export function copyCard(state, uid) {
   return say({ ...state, cards, nextUid: state.nextUid + 1 }, `${verb} ${orig.name}`);
 }
 
+// Where a card sits among its neighbours on the battlefield. state.cards is
+// the order everything is drawn in, so putting a card in a new place is a
+// move within that array; beforeUid is the card to drop in front of, or null
+// for the end of the run.
+//
+// A run is one owner's half of one battlefield row, and a card never leaves
+// it: the rows are told apart by isLand, so a card dragged across them would
+// contradict what it is. Like where a counter square sits, this is
+// presentation and not a move in the game, so it says nothing in the log.
+export function reorderCard(state, uid, beforeUid) {
+  const i = state.cards.findIndex((c) => c.uid === uid);
+  if (i < 0 || uid === beforeUid) return state;
+  const c = state.cards[i];
+  if (c.zone !== 'battlefield') return state;
+  const beside = (x) => x.owner === c.owner && x.zone === c.zone && isLand(x) === isLand(c);
+  const rest = [...state.cards.slice(0, i), ...state.cards.slice(i + 1)];
+  let at;
+  if (beforeUid == null) {
+    // After the last of its own run, rather than the end of the whole array:
+    // that would look the same on the table and churn the save for nothing.
+    const last = rest.reduce((k, x, j) => (beside(x) ? j : k), -1);
+    if (last < 0) return state; // nothing to sit behind: the run is the card itself
+    at = last + 1;
+  } else {
+    at = rest.findIndex((x) => x.uid === beforeUid);
+    if (at < 0 || !beside(rest[at])) return state;
+  }
+  // Taken out at i and put back at i is the order it already had.
+  if (at === i) return state;
+  return { ...state, cards: [...rest.slice(0, at), c, ...rest.slice(at)] };
+}
+
 // The turn passes round the table. The player whose turn begins untaps;
 // everyone else's permanents stay as they are.
 export function nextTurn(state) {

@@ -847,3 +847,74 @@ A new fixture is needed for an Equipment card; add
 `tests/fixtures/bonesplitter.json` in the shape of the existing fixtures
 (a real Scryfall `/cards/named` response, trimmed to the fields
 `parseCard` reads) and wire it into the stub's `byName` map.
+
+## Task 12 — the staged card is acted on by right-clicking it
+
+Added to the plan on 2026-09-24, after the original approval, replacing part
+of Task 5. Runs after Task 7 and before Task 9.
+
+**Files:** `index.html`, `app.js`, `style.css`, `tests/browser.mjs`
+
+The `card ▾` button in the navbar goes. The staged card is right-clicked
+instead, exactly like a card on the table, and the same four destinations
+appear in the menu. One way to act on a card, wherever it is.
+
+### What goes
+
+- `#menu-card` in `index.html`, and every line in `app.js` that enables,
+  disables, or opens it. The navbar is left with `game ▾` alone.
+- The `renderStaged` logic that toggles `#menu-card.disabled` — there is no
+  button left to disable. The slot's own `hidden` toggle stays.
+
+### What arrives
+
+The staging slot becomes a card you can act on:
+
+- `#staged` gets `tabindex="0"`, `role="group"`, `aria-haspopup="menu"`, and
+  an `aria-label` naming the staged card and saying it is staged — e.g.
+  `Lightning Bolt, staged`, rebuilt whenever the slot is filled.
+- A `contextmenu` listener on `#staged` calls `preventDefault()` and opens
+  the existing four-item menu at the pointer:
+  `openMenu(stagedEl, cardMenu(), { x: e.clientX, y: e.clientY })`.
+  `cardMenu()` already exists from Task 5 and already rebuilds its
+  opponent-facing labels from `G.label(game, view.opp)` on each open — reuse
+  it unchanged, do not fork it.
+- A `keydown` listener: Enter, and the ContextMenu key, open the same menu
+  hanging under the slot (no `at`). This matches the card contract from
+  Task 3, where Enter always opens the menu.
+- The × button keeps working and must not open the menu; a right-click on
+  the × opens the slot's menu like anywhere else in the slot.
+- The slot gets `cursor: context-menu` and a `title` reading
+  `right-click to send it to a zone`, so the affordance is visible.
+
+### Discoverability
+
+With the navbar button gone, nothing on screen announces the interaction,
+so the status line after staging must say so. Change it from
+`` `${card.name} — choose from card ▾` `` to
+`` `${card.name} — right-click it to place it` ``.
+
+### The keys are unchanged
+
+Enter on the empty search box with a card staged still sends it to my hand,
+and shift+Enter still means the opponent in view plays it. That fast path is
+the reason the slot exists; only the *menu*'s home has moved.
+
+### Tests
+
+Update every browser check that reaches `#menu-card` — they are the ones
+Task 5 added — to right-click `#staged` instead. The `menuPick`-style helper
+Task 3 added for right-clicking a card is the one to reuse. Then check:
+
+- the navbar has one button, `game`, and no `card` button exists
+- right-clicking the staged card opens a menu with the four destinations,
+  the opponent-facing two naming the opponent in view
+- each of the four places the card in the right zone and clears the slot —
+  all four clicked, not merely asserted by label
+- switching the opponent tab and re-opening the menu relabels the two
+  opponent items and sends to the opponent now in view
+- Enter on the focused slot opens the same menu
+- the × still discards without touching the table
+- Escape closes the menu leaving the card staged
+- Enter and shift+Enter on the empty search box still place the staged card
+- the status line after staging names the card and mentions right-clicking

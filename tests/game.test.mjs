@@ -8,7 +8,7 @@ import {
   newGame, addCard, play, toggleTap, moveTo, remove, nextTurn, adjustLife, setLife,
   isPermanent, cardsIn, load, players, label, setOpponents, MAX_OPPONENTS, resetGame,
   parseCounterKind, addCounter, adjustCounter, moveCounter, isLand, copyCard,
-  commanders, adjustCommanderDamage, reorderCard,
+  commanders, adjustCommanderDamage, reorderCard, isEquipment, isCreature, equip, unequip,
 } from '../game.js';
 
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url)));
@@ -16,6 +16,7 @@ const BOLT = parseCard(fixture('bolt'));
 const ELVES = parseCard(fixture('elves'));
 const DELVER = parseCard(fixture('delver'));
 const FOREST = parseCard(fixture('forest'));
+const BONES = parseCard(fixture('bonesplitter'));
 
 const last = (s) => s.log[s.log.length - 1];
 const only = (s, owner, zone) => { const c = cardsIn(s, owner, zone); assert.equal(c.length, 1); return c[0]; };
@@ -689,4 +690,130 @@ test('a save from before commander damage opens without it, not rejected', () =>
   for (const junk of [[], 'x', 3, null]) {
     assert.deepEqual(load(JSON.stringify({ ...old, cmdDamage: junk })), { ...old, cmdDamage: {} }, JSON.stringify(junk));
   }
+});
+
+// --- equipment -----------------------------------------------------------
+
+// My Bonesplitter and two of my creatures, all three on my battlefield:
+// the uids are '1' for the equipment, '2' and '3' for the creatures.
+const armed = () => {
+  let g = addCard(newGame(), BONES, 'me', 'battlefield');
+  g = addCard(g, ELVES, 'me', 'battlefield');
+  return addCard(g, DELVER, 'me', 'battlefield');
+};
+const card = (g, uid) => g.cards.find((c) => c.uid === uid);
+
+test('isEquipment and isCreature: the front face decides, as it does for a land', () => {
+  assert.equal(isEquipment(BONES), true);
+  assert.equal(isCreature(BONES), false);
+  assert.equal(isCreature(ELVES), true);
+  assert.equal(isEquipment(ELVES), false);
+  assert.equal(isCreature(DELVER), true, 'both faces are creatures');
+  assert.equal(isCreature(FOREST), false);
+  assert.equal(isCreature({ typeLine: 'Enchantment — Aura // Creature — Spirit' }), false, 'the back face is not the card');
+  assert.equal(isEquipment({ typeLine: 'Legendary Artifact — Equipment' }), true);
+  assert.equal(isEquipment({ typeLine: 'Instant // Artifact — Equipment' }), false);
+  assert.equal(isCreature({}), false);
+});
+
+test('equip attaches an equipment to a creature and says so', () => {
+  const g = equip(armed(), '1', '2');
+  assert.equal(card(g, '1').attachedTo, '2');
+  assert.equal(last(g).text, 'I equip Llanowar Elves with Bonesplitter');
+  assert.equal(card(g, '2').attachedTo, undefined, 'the creature carries nothing: the attachment is the equipment\'s');
+});
+
+test('equipping a second creature moves it, with a line of its own', () => {
+  const g0 = equip(armed(), '1', '2');
+  const g = equip(g0, '1', '3');
+  assert.equal(card(g, '1').attachedTo, '3');
+  assert.equal(g.log.length, g0.log.length + 1);
+  assert.match(last(g).text, /I equip Delver of Secrets .* with Bonesplitter/);
+});
+
+test('the opponent equips their own, in their own words', () => {
+  let g = addCard(newGame(), BONES, 'opp1', 'battlefield');
+  g = addCard(g, ELVES, 'opp1', 'battlefield');
+  g = equip(g, '1', '2');
+  assert.equal(card(g, '1').attachedTo, '2');
+  assert.equal(last(g).text, 'opponent equips Llanowar Elves with Bonesplitter');
+});
+
+test('equip refuses anything that is not an equipment on a creature of its owner\'s, on the battlefield', () => {
+  const g = armed();
+  assert.equal(equip(g, '2', '3'), g, 'a creature is not an equipment');
+  assert.equal(equip(g, '1', '1'), g, 'nothing is equipped with itself');
+  assert.equal(equip(g, '1', 'nope'), g, 'an unknown host');
+  assert.equal(equip(g, 'nope', '2'), g, 'an unknown equipment');
+  const land = addCard(g, FOREST, 'me', 'battlefield');
+  assert.equal(equip(land, '1', '4'), land, 'a land is not a creature');
+  const inHand = moveTo(g, '1', 'hand');
+  assert.equal(equip(inHand, '1', '2'), inHand, 'the equipment is not on the battlefield');
+  const away = moveTo(g, '2', 'graveyard');
+  assert.equal(equip(away, '1', '2'), away, 'the creature is not on the battlefield');
+  const theirs = addCard(g, ELVES, 'opp1', 'battlefield');
+  assert.equal(equip(theirs, '1', '4'), theirs, 'a creature across the table');
+  const on = equip(g, '1', '2');
+  assert.equal(equip(on, '1', '2'), on, 'the creature it is already on');
+});
+
+test('unequip takes it off and says so; on a card wearing nothing it is nothing', () => {
+  const g0 = equip(armed(), '1', '2');
+  const g = unequip(g0, '1');
+  assert.equal('attachedTo' in card(g, '1'), false, 'the key goes, so a save carries no attachment to nowhere');
+  assert.equal(last(g).text, 'my Bonesplitter comes off Llanowar Elves');
+  assert.equal(unequip(g, '1'), g, 'nothing to take off');
+  assert.equal(unequip(g, '2'), g, 'a creature is wearing nothing either');
+  assert.equal(unequip(g, 'nope'), g);
+});
+
+test('the creature leaving the battlefield, or being removed, takes the equipment off', () => {
+  const g0 = equip(armed(), '1', '2');
+  for (const g of [moveTo(g0, '2', 'graveyard'), remove(g0, '2'), moveTo(g0, '2', 'command')]) {
+    assert.equal('attachedTo' in card(g, '1'), false);
+    assert.equal(g.log.length, g0.log.length + 1, 'the move says it; the detaching adds no line');
+  }
+  assert.equal(card(play(addCard(g0, BONES, 'me'), '4'), '1').attachedTo, '2', 'and another card played leaves it on');
+});
+
+test('the equipment leaving the battlefield comes off by itself', () => {
+  const g0 = equip(armed(), '1', '2');
+  for (const g of [moveTo(g0, '1', 'graveyard'), moveTo(g0, '1', 'hand'), remove(g0, '2')]) {
+    assert.equal(card(g, '1')?.attachedTo, undefined);
+  }
+  // Back in hand and played again, it comes out onto the table on nothing.
+  const again = play(moveTo(g0, '1', 'hand'), '1');
+  assert.equal('attachedTo' in card(again, '1'), false);
+});
+
+test('a copy of an attached equipment arrives on nothing, as it arrives untapped', () => {
+  const g = copyCard(equip(armed(), '1', '2'), '1');
+  assert.equal(card(g, '1').attachedTo, '2', 'the original is as it was');
+  assert.equal('attachedTo' in card(g, '4'), false);
+});
+
+test('an attached equipment has no place of its own in the row, so it does not reorder', () => {
+  const g = equip(armed(), '1', '2');
+  assert.equal(reorderCard(g, '1', '3'), g, 'it goes where its host goes');
+  assert.equal(reorderCard(g, '1', null), g);
+  assert.notEqual(reorderCard(g, '3', '2'), g, 'the creatures either side of it still move');
+});
+
+test('a game with an equipment on a creature saves and loads', () => {
+  const g = equip(armed(), '1', '2');
+  assert.deepEqual(load(JSON.stringify(g)), g);
+});
+
+test('load drops an attachment that points at no creature on the battlefield, and keeps the game', () => {
+  const g = equip(armed(), '1', '2');
+  const strand = (cards) => load(JSON.stringify({ ...g, cards }));
+  const gone = strand(g.cards.filter((c) => c.uid !== '2'));
+  assert.equal('attachedTo' in gone.cards[0], false, 'a host that is not on the table at all');
+  assert.equal(gone.cards.length, 2, 'and the rest of the game opens as it was');
+  const buried = strand(g.cards.map((c) => (c.uid === '2' ? { ...c, zone: 'graveyard' } : c)));
+  assert.equal('attachedTo' in buried.cards[0], false, 'a host that is off the battlefield');
+  const notACreature = strand(g.cards.map((c) => (c.uid === '2' ? { ...c, typeLine: 'Enchantment' } : c)));
+  assert.equal('attachedTo' in notACreature.cards[0], false, 'a host that is not a creature');
+  const itself = strand(g.cards.map((c) => (c.uid === '1' ? { ...c, attachedTo: '1' } : c)));
+  assert.equal(itself.cards[0].attachedTo, undefined, 'and one pointing at itself is no creature either');
 });

@@ -14,10 +14,11 @@
 //   nextUid,
 // }
 //
-// instance = { uid, owner, zone, tapped, commander?, counters?, ...card }
-// where card is what scryfall.js's parseCard returns, and
+// instance = { uid, owner, zone, tapped, commander?, counters?, attachedTo?, ...card }
+// where card is what scryfall.js's parseCard returns,
 // counters = [{ id, kind, count, x, y }]: one square per kind, at a place
-// on the card given as fractions of its box.
+// on the card given as fractions of its box, and attachedTo is the uid of
+// the creature an equipment is on, absent when it is on nothing.
 
 export const MAX_OPPONENTS = 3;
 export const ZONES = ['hand', 'battlefield', 'graveyard', 'exile', 'command'];
@@ -36,20 +37,24 @@ const zoneName = (zone) => (zone === 'command' ? 'command zone' : zone);
 
 const PERMANENT_TYPES = ['Creature', 'Land', 'Artifact', 'Enchantment', 'Planeswalker', 'Battle'];
 
+// What a card is, is what its front face says: a modal card with a land on
+// the back is still not a land, and none of these ever read past the //.
+const front = (card) => (card.typeLine || '').split('//')[0];
+
 // Instants and sorceries are the only card types that never stay on the
 // battlefield. Everything else, including a card whose front face is a
 // creature and back face an anything, is a permanent.
 export function isPermanent(card) {
-  const front = (card.typeLine || '').split('//')[0];
-  if (/\b(Instant|Sorcery)\b/.test(front)) return false;
-  return PERMANENT_TYPES.some((t) => new RegExp(`\\b${t}\\b`).test(front));
+  const face = front(card);
+  if (/\b(Instant|Sorcery)\b/.test(face)) return false;
+  return PERMANENT_TYPES.some((t) => new RegExp(`\\b${t}\\b`).test(face));
 }
 
-// Lands sit in their own row on the battlefield. The front face decides,
-// so a modal card with a land on the back still goes where its front says.
-export function isLand(card) {
-  return /\bLand\b/.test((card.typeLine || '').split('//')[0]);
-}
+// Lands sit in their own row on the battlefield.
+export const isLand = (card) => /\bLand\b/.test(front(card));
+// What can be attached to a creature, and what can be equipped.
+export const isEquipment = (card) => /\bEquipment\b/.test(front(card));
+export const isCreature = (card) => /\bCreature\b/.test(front(card));
 
 export const cardsIn = (state, owner, zone) => state.cards.filter((c) => c.owner === owner && c.zone === zone);
 const find = (state, uid) => state.cards.find((c) => c.uid === uid);
@@ -60,6 +65,21 @@ const patch = (state, uid, changes) => ({
   ...state,
   cards: state.cards.map((c) => (c.uid === uid ? { ...c, ...changes } : c)),
 });
+
+// Attached to nothing, and the key gone with it, so a save never carries an
+// attachment to nowhere.
+const detach = (c) => { const { attachedTo, ...rest } = c; return rest; };
+
+// An attachment does not outlive either card's stay on the battlefield: the
+// equipment that leaves comes off whatever it was on, and the creature that
+// leaves — or is taken off the table — takes every equipment on it off. A
+// uid pointing at a card that is no longer beside it would draw an
+// equipment tucked in behind nothing. Whatever moved says so in the log
+// itself, so neither of these is worth a line of its own.
+const attachmentEnds = (c, uid) => (c.uid === uid ? Boolean(c.attachedTo) : c.attachedTo === uid);
+const detachAround = (state, uid) => (state.cards.some((c) => attachmentEnds(c, uid))
+  ? { ...state, cards: state.cards.map((c) => (attachmentEnds(c, uid) ? detach(c) : c)) }
+  : state);
 
 const clampOpponents = (n) => Math.max(1, Math.min(MAX_OPPONENTS, Math.round(Number(n)) || 1));
 // A life total is whatever the table agreed on, not always 20 — but it has
@@ -129,9 +149,13 @@ export function addCard(state, card, owner, zone) {
 export function play(state, uid) {
   const c = find(state, uid);
   if (!c || c.zone !== 'hand') return state;
+  // A save is only mended where its attachment points at nothing, so a card
+  // in hand can still be carrying one; it does not come back out onto the
+  // table wearing it.
+  const from = detachAround(state, uid);
   return isPermanent(c)
-    ? say(patch(state, uid, { zone: 'battlefield', tapped: false, counters: [] }), `${who(state, c.owner, 'play')} ${c.name}`)
-    : say(patch(state, uid, { zone: 'graveyard', counters: [] }), `${who(state, c.owner, 'cast')} ${c.name}`);
+    ? say(patch(from, uid, { zone: 'battlefield', tapped: false, counters: [] }), `${who(state, c.owner, 'play')} ${c.name}`)
+    : say(patch(from, uid, { zone: 'graveyard', counters: [] }), `${who(state, c.owner, 'cast')} ${c.name}`);
 }
 
 export function toggleTap(state, uid) {
@@ -145,17 +169,19 @@ export function moveTo(state, uid, zone) {
   if (!c || !ZONES.includes(zone) || c.zone === zone) return state;
   // Once a card has been in the command zone it is the commander wherever
   // it goes, so it can be told apart on the battlefield.
-  // Counters come off a card that changes zone, as they do in the game.
+  // Counters come off a card that changes zone, as they do in the game, and
+  // so does whatever it was equipping or equipped with.
   const changes = { zone, tapped: false, counters: [] };
   if (zone === 'command') changes.commander = true;
-  return say(patch(state, uid, changes), `${label(state, c.owner, 'possessive')} ${c.name} to ${zoneName(zone)}`);
+  return say(patch(detachAround(state, uid), uid, changes), `${label(state, c.owner, 'possessive')} ${c.name} to ${zoneName(zone)}`);
 }
 
 // For a mistake: the card was never there.
 export function remove(state, uid) {
   const c = find(state, uid);
   if (!c) return state;
-  const next = { ...state, cards: state.cards.filter((x) => x.uid !== uid) };
+  const gone = detachAround(state, uid);
+  const next = { ...gone, cards: gone.cards.filter((x) => x.uid !== uid) };
   // The card was never there, so neither was the damage it dealt: a tally
   // must not outlive the commander it is counted from.
   if (c.commander) {
@@ -166,17 +192,42 @@ export function remove(state, uid) {
 }
 
 // Another of the same card, right beside the original: a token copy, a
-// clone, a second Forest. Same owner and zone; untapped, no counters, and
-// not the commander even if the original is.
+// clone, a second Forest. Same owner and zone; untapped, no counters,
+// attached to nothing, and not the commander even if the original is.
 export function copyCard(state, uid) {
   const i = state.cards.findIndex((c) => c.uid === uid);
   if (i < 0) return state;
   const orig = state.cards[i];
-  const { commander, ...rest } = orig;
+  const { commander, attachedTo, ...rest } = orig;
   const copy = { ...rest, uid: String(state.nextUid), tapped: false, counters: [] };
   const cards = [...state.cards.slice(0, i + 1), copy, ...state.cards.slice(i + 1)];
   const verb = orig.owner === 'me' ? 'I copy' : `${label(state, orig.owner)} copies`;
   return say({ ...state, cards, nextUid: state.nextUid + 1 }, `${verb} ${orig.name}`);
+}
+
+// An equipment goes on a creature its owner controls, and is drawn tucked
+// in behind it from then on. Only its owner's creatures: each player's
+// board is drawn as their own, so a card tucked behind one across the table
+// would be tucked in behind nothing there is room for. Moving it to another
+// creature is the same attaching again; putting it back on the one it is
+// already on is nothing happening.
+export function equip(state, uid, hostUid) {
+  const eq = find(state, uid);
+  const host = find(state, hostUid);
+  if (!eq || !host || uid === hostUid) return state;
+  if (!isEquipment(eq) || !isCreature(host)) return state;
+  if (eq.zone !== 'battlefield' || host.zone !== 'battlefield') return state;
+  if (eq.owner !== host.owner || eq.attachedTo === hostUid) return state;
+  return say(patch(state, uid, { attachedTo: hostUid }), `${who(state, eq.owner, 'equip')} ${host.name} with ${eq.name}`);
+}
+
+// Off again, and back to a place of its own in the row.
+export function unequip(state, uid) {
+  const eq = find(state, uid);
+  const host = eq?.attachedTo ? find(state, eq.attachedTo) : null;
+  if (!host) return state; // on nothing; nothing on the table points at a card that has gone
+  return say({ ...state, cards: state.cards.map((c) => (c.uid === uid ? detach(c) : c)) },
+    `${label(state, eq.owner, 'possessive')} ${eq.name} comes off ${host.name}`);
 }
 
 // Where a card sits among its neighbours on the battlefield. state.cards is
@@ -193,6 +244,9 @@ export function reorderCard(state, uid, beforeUid) {
   if (i < 0 || uid === beforeUid) return state;
   const c = state.cards[i];
   if (c.zone !== 'battlefield') return state;
+  // An attached equipment is drawn behind its host wherever the host goes,
+  // so it has no place of its own in the row to be moved along.
+  if (c.attachedTo) return state;
   const beside = (x) => x.owner === c.owner && x.zone === c.zone && isLand(x) === isLand(c);
   const rest = [...state.cards.slice(0, i), ...state.cards.slice(i + 1)];
   let at;
@@ -368,5 +422,16 @@ export function load(json) {
   if (typeof s.startingLife !== 'number') s = { ...s, startingLife: 20 };
   // A save from before commander damage was kept simply has none of it.
   if (!s.cmdDamage || typeof s.cmdDamage !== 'object' || Array.isArray(s.cmdDamage)) s = { ...s, cmdDamage: {} };
-  return s;
+  // An attachment is only ever drawn behind a creature on the battlefield,
+  // so one pointing anywhere else is dropped rather than left to strand the
+  // card behind nothing. Mended, not rejected: a bad pointer is no reason
+  // to throw a whole game away.
+  return {
+    ...s,
+    cards: s.cards.map((c) => {
+      if (c.attachedTo == null) return c;
+      const host = find(s, c.attachedTo);
+      return host?.zone === 'battlefield' && isCreature(host) ? c : detach(c);
+    }),
+  };
 }

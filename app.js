@@ -668,6 +668,29 @@ const MOVES = [
   ['command', 'to the command zone'],
 ];
 
+// The cards beside this one in its row: its owner's half of one battlefield
+// row, which is as far as a card can be moved along. The same run
+// reorderCard works within, in the same order the row is drawn in.
+const runFor = (c) => G.cardsIn(game, c.owner, 'battlefield').filter((x) => G.isLand(x) === G.isLand(c));
+
+// Stepping along the row a place at a time, for the keyboard and for a
+// finger: dragging is a mouse and a pen only, and a card's place on the
+// table should not be theirs alone. Offered only where there is a
+// neighbour to step over — at the end of a run there is nowhere to go.
+function moveItems(uid, zone) {
+  const c = zone === 'battlefield' ? game.cards.find((x) => x.uid === uid) : null;
+  if (!c) return [];
+  const run = runFor(c);
+  const i = run.findIndex((x) => x.uid === uid);
+  const items = [];
+  // Left is in front of the neighbour on the left; right is in front of
+  // whatever follows the one on the right, and nothing following it means
+  // the end of the row.
+  if (i > 0) items.push({ label: 'move left', title: 'one place earlier in its row', run: () => commit(G.reorderCard(game, uid, run[i - 1].uid)) });
+  if (i >= 0 && i < run.length - 1) items.push({ label: 'move right', title: 'one place later in its row', run: () => commit(G.reorderCard(game, uid, run[i + 2]?.uid ?? null)) });
+  return items;
+}
+
 // What can be done with the card, read off the element: it knows its uid
 // and the zone it is in, which is all any of these need.
 function itemsFor(el) {
@@ -680,6 +703,7 @@ function itemsFor(el) {
   items.push({ label: 'copy', title: 'another of this card, beside it', run: () => commit(G.copyCard(game, uid)) });
   // Nothing in hand is on the table yet, so nothing there can be counted.
   if (zone !== 'hand') items.push({ label: 'add counter…', title: 'a +1/+1, or a kind of your own', run: () => openPicker(el) });
+  items.push(...moveItems(uid, zone));
   items.push('-');
   for (const [z, label] of MOVES) if (z !== zone) items.push({ label, run: () => commit(G.moveTo(game, uid, z)) });
   items.push('-', { label: 'remove', title: 'the card was never there (a mistake)', run: () => commit(G.remove(game, uid)) });
@@ -852,8 +876,12 @@ let dragged = false;
 
 const CARD_DRAG_PX = 4; // a card is a bigger thing to nudge than a square, whose threshold is 3
 
+// Any press at all, anywhere: the flag belongs to the gesture just ended,
+// and a press that starts a new one — on the table or off it — ends its
+// claim on the next click.
+window.addEventListener('pointerdown', () => { dragged = false; }, true);
+
 table.addEventListener('pointerdown', (e) => {
-  dragged = false;
   if (e.button !== 0 || e.target.closest('button') || e.target.closest('.ctr-pick')) return;
   const sq = e.target.closest('.counter');
   if (sq) {
@@ -890,6 +918,14 @@ function restingBox(el) {
   const box = el.getBoundingClientRect();
   el.style.transform = held;
   return box;
+}
+
+// Whether the pointer is over the row the card came from. A drag reorders
+// one row: taken outside it the card is on its way nowhere, so the row is
+// left as it is until the pointer comes back.
+function overTier(x, y) {
+  const r = drag.tier.getBoundingClientRect();
+  return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
 }
 
 // Live reordering rather than a marker: as the pointer passes the middle of
@@ -938,7 +974,7 @@ function onPointerMove(e) {
     hidePeek(); // a panel about the card in hand, following it over the others
     closeMenu();
   }
-  reorderUnder(e.clientX, e.clientY);
+  if (overTier(e.clientX, e.clientY)) reorderUnder(e.clientX, e.clientY);
   carry(e.clientX, e.clientY);
 }
 
@@ -963,7 +999,9 @@ function endDrag(keep = true) {
   card.style.transform = '';
   if (!moved) return;
   dragged = true; // the click that follows is this drag's, not a tap
-  if (!keep) { tier.insertBefore(card, home); return; }
+  // Back where it came from — unless what it stood in front of has gone in
+  // the meantime, in which case the end of the row is as near as it gets.
+  if (!keep) { tier.insertBefore(card, home?.isConnected ? home : null); return; }
   // The element is already where it was dropped: the card in front of it is
   // the one to go in front of, and nothing after it means the end of the row.
   commit(G.reorderCard(game, card.dataset.uid, card.nextElementSibling?.dataset.uid ?? null));
@@ -972,8 +1010,7 @@ function endDrag(keep = true) {
 function onPointerUp(e) {
   // A card let go anywhere but the row it came from was never going there:
   // a drag reorders one row, and does not move a card out of it.
-  const r = drag?.card && drag.tier.getBoundingClientRect();
-  endDrag(!r || (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom));
+  endDrag(!drag?.card || overTier(e.clientX, e.clientY));
 }
 
 // On the window, not the table: a card is let go wherever the pointer has

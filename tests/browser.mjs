@@ -114,10 +114,19 @@ try {
     const x = side === 'before' ? to.left + 4 : side === 'after' ? to.right - 4 : to.x;
     await mouse('mousePressed', from.x, from.y);
     for (let i = 1; i <= 8; i++) await mouse('mouseMoved', Math.round(from.x + ((x - from.x) * i) / 8), Math.round(from.y + ((to.y - from.y) * i) / 8));
-    const during = JSON.parse(await evalJs(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});const s=getComputedStyle(e);return JSON.stringify({dragging:e.classList.contains('dragging'),opacity:Math.round(parseFloat(s.opacity)*100)/100,zoom:Math.round(new DOMMatrix(s.transform).a*1000)/1000,cursor:s.cursor,moved:e.style.transform!=='',at:[...e.parentElement.children].indexOf(e)})})()`));
+    const during = JSON.parse(await evalJs(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});const s=getComputedStyle(e);return JSON.stringify({dragging:e.classList.contains('dragging'),opacity:Math.round(parseFloat(s.opacity)*100)/100,zoom:Math.round(new DOMMatrix(s.transform).a*1000)/1000,cursor:s.cursor,imgCursor:getComputedStyle(e.querySelector('img')).cursor,moved:e.style.transform!=='',at:[...e.parentElement.children].indexOf(e)})})()`));
     await mouse('mouseReleased', x, to.y, 0);
     await sleep(150);
     return during;
+  };
+  // A press that travels less than the threshold: still a click, and the
+  // card it is on should still tap.
+  const nudge = async (sel, by) => {
+    const p = await centre(sel);
+    await mouse('mousePressed', p.x, p.y);
+    await mouse('mouseMoved', p.x + by, p.y);
+    await mouse('mouseReleased', p.x + by, p.y, 0);
+    await sleep(100);
   };
   const peekUi = (sel = '.card') => evalJs(`(()=>{const p=document.getElementById('peek');const r=p.getBoundingClientRect();const c=document.querySelector(${JSON.stringify(sel)})?.getBoundingClientRect()??{left:0,right:0};return {hidden:p.hidden,text:p.textContent,rows:[...p.children].map(e=>e.className),aria:p.getAttribute('aria-hidden'),fixed:getComputedStyle(p).position,gap:Math.round((r.left-c.right)*10)/10,width:Math.round(r.width),inView:r.left>=8&&r.top>=8&&r.right<=innerWidth-8&&r.bottom<=innerHeight-8}})()`);
   const ghosts = () => evalJs(`[...document.querySelectorAll('.ghost')].map(g=>({effect:g.dataset.effect, halves:g.querySelectorAll('.ghost-half').length, imgs:g.querySelectorAll('img').length, fixed:getComputedStyle(g).position, events:getComputedStyle(g).pointerEvents, hidden:g.getAttribute('aria-hidden'), running:g.getAnimations({subtree:true}).map(a=>a.animationName).sort()}))`);
@@ -410,7 +419,7 @@ try {
   let carried = await dragOnto(`.card[data-uid="${order[1]}"]`, `.card[data-uid="${order[0]}"]`, 'before');
   let now = await rowOf('spells');
   check('dragging the second creature in front of the first reorders the row, and the saved game agrees', now.join('|') === [order[1], order[0], order[2]].join('|') && (await savedRow(false)).join('|') === now.join('|'), JSON.stringify({ order, now, saved: await savedRow(false) }));
-  check('mid-drag the card is carried: raised, see-through, under the pointer, not zoomed, and already first in the row', carried.dragging && carried.opacity === 0.85 && carried.zoom === 1 && carried.cursor === 'grabbing' && carried.moved && carried.at === 0, JSON.stringify(carried));
+  check('mid-drag the card is carried: raised, see-through, under the pointer, grabbing over card and image alike, not zoomed, and already first in the row', carried.dragging && carried.opacity === 0.85 && carried.zoom === 1 && carried.cursor === 'grabbing' && carried.imgCursor === 'grabbing' && carried.moved && carried.at === 0, JSON.stringify(carried));
   check('the drag leaves no log line: where a card sits is not a move in the game', (await ui()).log.length === logWas, JSON.stringify((await ui()).log.slice(0, 2)));
   check('and it did not tap the card it carried, nor leave it carrying anything', !(await zone('me', 'battlefield')).find((c) => c.uid === order[1]).tapped && (await evalJs(`document.querySelectorAll('.card.dragging').length`)) === 0 && (await el(`.card[data-uid="${order[1]}"]`, 'e.style.transform')) === '');
   check('the lands row was left alone', (await rowOf('lands')).join('|') === lands.join('|'));
@@ -419,6 +428,31 @@ try {
   check('a press that does not travel is still a click, and still taps the card', (await zone('me', 'battlefield')).find((c) => c.uid === order[1]).tapped);
   await clickAt(`.card[data-uid="${order[1]}"]`); await sleep(80);
   check('(untapped again)', !(await zone('me', 'battlefield')).find((c) => c.uid === order[1]).tapped);
+  await nudge(`.card[data-uid="${order[1]}"]`, 2);
+  check('a press that travels less than the threshold is a tap too: the card taps and the row does not move', (await zone('me', 'battlefield')).find((c) => c.uid === order[1]).tapped && (await rowOf('spells')).join('|') === now.join('|'), JSON.stringify(await rowOf('spells')));
+  await clickAt(`.card[data-uid="${order[1]}"]`); await sleep(80);
+  check('(untapped again)', !(await zone('me', 'battlefield')).find((c) => c.uid === order[1]).tapped);
+
+  // the same reorder without a pointer to drag with: the card's own menu,
+  // which a finger and the keyboard both reach
+  await rightClickAt(`.card[data-uid="${now[1]}"]`);
+  check('a card with a neighbour on either side offers move left and move right', (await menuItems()) === 'copy|add counter…|move left|move right|-|to hand|to the graveyard|to exile|to the command zone|-|remove', await menuItems());
+  const moveTitles = await evalJs(`[...document.querySelectorAll('#menu [role="menuitem"]')].filter(b=>b.textContent.startsWith('move ')).map(b=>b.title).join('|')`);
+  check('and each says what it does', moveTitles === 'one place earlier in its row|one place later in its row', moveTitles);
+  await pickItem('move left'); await sleep(80);
+  check('move left steps the card one place earlier in its row, and the save agrees', (await rowOf('spells')).join('|') === [now[1], now[0], now[2]].join('|') && (await savedRow(false)).join('|') === (await rowOf('spells')).join('|'), JSON.stringify(await rowOf('spells')));
+  logWas = (await ui()).log.length;
+  await menuPick(`.card[data-uid="${now[1]}"]`, 'move right'); await sleep(80);
+  check('move right steps it back, and neither wrote a log line', (await rowOf('spells')).join('|') === now.join('|') && (await ui()).log.length === logWas, JSON.stringify(await rowOf('spells')));
+  await rightClickAt(`.card[data-uid="${now[0]}"]`);
+  check('the first card of a run is offered move right and no move left', (await menuItems()) === 'copy|add counter…|move right|-|to hand|to the graveyard|to exile|to the command zone|-|remove', await menuItems());
+  await key('Escape', 'Escape', 27); await sleep(50);
+  await rightClickAt(`.card[data-uid="${now[2]}"]`);
+  check('the last is offered move left and no move right', (await menuItems()) === 'copy|add counter…|move left|-|to hand|to the graveyard|to exile|to the command zone|-|remove', await menuItems());
+  await key('Escape', 'Escape', 27); await sleep(50);
+  await rightClickAt(`.card[data-uid="${lands[0]}"]`);
+  check('a land is offered the moves of its own row, not the spells row\'s', (await menuItems()).includes('move right') && !(await menuItems()).includes('move left'), await menuItems());
+  await key('Escape', 'Escape', 27); await sleep(50);
 
   // a row at a time: a land dragged at the spells row goes back where it was
   const saveWas = JSON.stringify(await state());
@@ -433,6 +467,23 @@ try {
   check('a card dropped past the last of its row goes to the end of it', (await rowOf('spells')).join('|') === [now[1], now[2], now[0]].join('|'), JSON.stringify(await rowOf('spells')));
   await click('#undo'); await sleep(80);
   check('undo puts the order back, on the table and in the save', (await rowOf('spells')).join('|') === now.join('|') && (await savedRow(false)).join('|') === now.join('|'), JSON.stringify(await rowOf('spells')));
+
+  // A drag called off with escape and let go over the log sends its click to
+  // the log rather than the table, so nothing there clears the flag that
+  // says the last press was a drag. The next press anywhere must clear it,
+  // or it would swallow a click it has nothing to do with.
+  const held = await centre(`.card[data-uid="${now[0]}"]`);
+  await mouse('mousePressed', held.x, held.y);
+  for (let i = 1; i <= 6; i++) await mouse('mouseMoved', held.x + 6 * i, held.y);
+  await key('Escape', 'Escape', 27); await sleep(50);
+  const away = await centre('#log-panel');
+  await mouse('mouseReleased', away.x, away.y, 0); await sleep(80);
+  check('escape calls a drag off: the card goes back and the row is as it was', (await rowOf('spells')).join('|') === now.join('|') && (await el(`.card[data-uid="${now[0]}"]`, 'e.style.transform')) === '' && (await evalJs(`document.querySelectorAll('.card.dragging').length`)) === 0, JSON.stringify(await rowOf('spells')));
+  await clickAt('#turn'); // a press with nothing to do with the table
+  await click(`.card[data-uid="${now[0]}"] img`); await sleep(80);
+  check('and a press anywhere after it clears the drag, so the next click on a card taps it', (await zone('me', 'battlefield')).find((c) => c.uid === now[0]).tapped);
+  await click(`.card[data-uid="${now[0]}"] img`); await sleep(80);
+  check('(untapped again)', !(await zone('me', 'battlefield')).find((c) => c.uid === now[0]).tapped);
 
   await menuPick(`.card[data-uid="${order[1]}"]`, 'remove'); await sleep(50);
   await menuPick(`.card[data-uid="${order[2]}"]`, 'remove'); await sleep(50);

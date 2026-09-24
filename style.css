@@ -506,8 +506,10 @@ h3 { font-size: 0.68rem; }
 .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .battlefield .card.permanent img { cursor: pointer; }
 .battlefield .card.permanent:hover img { box-shadow: 0 0 0 2px var(--accent), 0 2px 8px rgba(0, 0, 0, 0.6); }
-/* On the image too, which has a pointer of its own for the tap. */
-.card.dragging, .card.dragging img { cursor: grabbing; }
+/* On the image too, which covers the whole card and carries a pointer of
+   its own for the tap; that rule is the selector above it, so this one has
+   to match it and come after rather than merely come after. */
+.card.dragging, .battlefield .card.dragging img { cursor: grabbing; }
 
 /* A commander wears a mark wherever it is, so it can be told from the
    rest once it is on the battlefield. */

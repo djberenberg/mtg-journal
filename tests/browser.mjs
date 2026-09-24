@@ -483,6 +483,22 @@ try {
   check('a land cannot be dropped into the spells row: it is carried, but both rows are as they were and nothing was saved', carried.dragging && (await rowOf('lands')).join('|') === lands.join('|') && (await rowOf('spells')).join('|') === now.join('|') && JSON.stringify(await state()) === saveWas, JSON.stringify({ carried, lands: await rowOf('lands'), spells: await rowOf('spells') }));
   check('the land it carried is back in its own row, carrying nothing', (await el(`.card[data-uid="${lands[0]}"]`, "e.closest('.tier').dataset.tier")) === 'lands' && (await el(`.card[data-uid="${lands[0]}"]`, 'e.style.transform')) === '' && (await evalJs(`document.querySelectorAll('.card.dragging').length`)) === 0);
 
+  // Mid-drag the slot is as quiet as the table: a menu about the staged card
+  // would be asking about a card the hand is not on. The right-click is
+  // dispatched rather than pressed, since a real right button sends a
+  // pointerup of its own, which would put the carried card down before the
+  // menu was ever asked for — and it is the carrying that is being tested.
+  await stage('bolt');
+  const carryFrom = await centre(`.card[data-uid="${now[0]}"]`);
+  await mouse('mousePressed', carryFrom.x, carryFrom.y);
+  for (let i = 1; i <= 5; i++) await mouse('mouseMoved', carryFrom.x + i * 5, carryFrom.y);
+  const slotMidDrag = JSON.parse(await evalJs(`(()=>{const s=document.getElementById('staged');const r=s.getBoundingClientRect();const ev=new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:Math.round(r.left+r.width/2),clientY:Math.round(r.top+r.height/2)});s.dispatchEvent(ev);return JSON.stringify({carrying:document.querySelectorAll('.card.dragging').length,prevented:ev.defaultPrevented,menuHidden:document.getElementById('menu').hidden})})()`));
+  check('right-clicking the staged slot while a card is being carried opens no menu, as on the table', slotMidDrag.carrying === 1 && slotMidDrag.menuHidden === true && slotMidDrag.prevented === true, JSON.stringify(slotMidDrag));
+  await mouse('mouseMoved', carryFrom.x, carryFrom.y);
+  await mouse('mouseReleased', carryFrom.x, carryFrom.y, 0); await sleep(150);
+  await click('#staged-clear'); await sleep(50);
+  check('(the carried card is back where it was and the slot is empty again)', (await rowOf('spells')).join('|') === now.join('|') && (await stagedUi()).hidden, JSON.stringify(await rowOf('spells')));
+
   await send('Page.navigate', { url: `${BASE}/` }); await sleep(800);
   check('the order survives a reload', (await rowOf('spells')).join('|') === now.join('|'), JSON.stringify(await rowOf('spells')));
   // The reload emptied the undo stack, so this drag is the one undo takes back.
@@ -925,6 +941,15 @@ try {
   const upBeforeRight = !(await el('#menu', 'e.hidden'));
   await rightClick(4, 400); // the page's own background, where no card is
   check('a right-click outside puts it away too, rather than showing the browser its own menu on top', upBeforeRight && (await el('#menu', 'e.hidden')) && (await el('#menu-game', "e.getAttribute('aria-expanded')")) === 'false', `open first: ${upBeforeRight}`);
+  // And one that lands on the menu: the browser's has to be turned away
+  // here as well, or it comes up over the very menu it was aimed at. The
+  // listener is on window, so it reads the event after the page has had it.
+  await clickAt('#menu-game');
+  const onMenu = await menuRect();
+  await evalJs(`window.__onMenu = null; window.addEventListener('contextmenu', (e) => { window.__onMenu = e.defaultPrevented; }, { once: true })`);
+  await rightClick(Math.round(onMenu.left + onMenu.width / 2), Math.round(onMenu.top + 8));
+  check('a right-click on the menu itself keeps the browser\'s own off it, and leaves ours up', (await evalJs(`window.__onMenu`)) === true && !(await el('#menu', 'e.hidden')), JSON.stringify({ prevented: await evalJs(`window.__onMenu`), hidden: await el('#menu', 'e.hidden') }));
+  await key('Escape', 'Escape', 27); await sleep(50);
   await clickAt('#menu-game');
   await clickAt('#menu-game');
   check('a second click on the button closes its own menu rather than reopening it', await el('#menu', 'e.hidden'));

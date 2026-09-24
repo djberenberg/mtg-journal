@@ -701,7 +701,12 @@ document.addEventListener('click', (e) => {
 // tree — so by the time this fires the new opener is the card under the
 // pointer, and its own menu is left alone.
 document.addEventListener('contextmenu', (e) => {
-  if (menuOpen() && !menu.contains(e.target) && !menuOpener.contains(e.target)) closeMenu();
+  if (!menuOpen()) return;
+  // Landing on the menu itself: there is nothing to choose with the right
+  // button, so ours stays up — and the browser's is turned away here too,
+  // or it would sit on top of the very menu it was aimed at.
+  if (menu.contains(e.target)) { e.preventDefault(); return; }
+  if (!menuOpener.contains(e.target)) closeMenu();
 });
 
 // Both popups are fixed where they were put, so they would be left behind.
@@ -1250,6 +1255,9 @@ const cardMenu = () => [
 // can only fire on a card actually staged there.
 stagedEl.addEventListener('contextmenu', (e) => {
   e.preventDefault();
+  // As on the table: a hand is on a card already, so a menu about the staged
+  // one would be asking about neither card the player is holding.
+  if (drag) return;
   openMenu(stagedEl, cardMenu(), { x: e.clientX, y: e.clientY });
 });
 

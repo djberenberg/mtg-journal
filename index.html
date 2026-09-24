@@ -14,7 +14,6 @@
   <header class="bar">
     <nav class="navbar" id="navbar" aria-label="Actions">
       <button type="button" class="menu-btn" id="menu-game" aria-haspopup="menu" aria-expanded="false">game</button>
-      <button type="button" class="menu-btn" id="menu-card" aria-haspopup="menu" aria-expanded="false" disabled>card</button>
     </nav>
     <form class="search" id="search" autocomplete="off">
       <div class="field">
@@ -30,9 +29,10 @@
       <button type="button" id="log-toggle" aria-expanded="true" aria-controls="log-panel">log</button>
     </div>
     <!-- The card the search found, waiting for somewhere to go. It sits on
-         its own line under the search box; the status line says what to do
-         with it, so the image here is decoration. -->
-    <div class="staged" id="staged" hidden>
+         its own line under the search box, acted on the same way a card on
+         the table is: a right-click for its menu. The status line says so;
+         the image here is decoration, its own aria-label says the rest. -->
+    <div class="staged" id="staged" hidden tabindex="0" role="group" aria-haspopup="menu" title="right-click to send it to a zone">
       <img id="staged-img" alt="">
       <span class="staged-name" id="staged-name"></span>
       <button type="button" id="staged-clear" aria-label="Discard the staged card" title="discard">×</button>

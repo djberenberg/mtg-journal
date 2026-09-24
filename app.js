@@ -12,6 +12,7 @@ const $ = (id) => document.getElementById(id);
 const q = $('q');
 const suggest = $('suggest');
 const status = $('status');
+const stagedEl = $('staged');
 const logEl = $('log');
 const undoBtn = $('undo');
 const journal = $('journal');
@@ -350,7 +351,7 @@ async function stage() {
     staged = card;
     q.value = '';
     renderStaged();
-    setStatus(`${card.name} — choose from card ▾`);
+    setStatus(`${card.name} — right-click it to place it`);
   } catch (e) {
     setStatus(e instanceof NotFound ? e.message : `Scryfall: ${e.message}`, true);
   } finally {
@@ -387,14 +388,15 @@ function clearStaged() {
   renderStaged();
 }
 
-// The slot, and the menu button that acts on it: there is nothing for the
-// menu to offer while the slot is empty.
+// The slot, acted on by right-clicking it like a card on the table.
 function renderStaged() {
-  $('staged').hidden = !staged;
-  $('menu-card').disabled = !staged;
+  stagedEl.hidden = !staged;
   if (!staged) return;
   $('staged-img').src = staged.image;
   $('staged-name').textContent = staged.name;
+  // Named and flagged as staged, the way a card on the table says its own
+  // name and zone: a screen reader hears what it is before reaching the menu.
+  stagedEl.setAttribute('aria-label', `${staged.name}, staged`);
 }
 
 function setStatus(text, error = false) {
@@ -954,9 +956,21 @@ const cardMenu = () => [
   { label: `send to ${G.label(game, view.opp, 'possessive')} command zone`, title: 'as their commander', run: () => place('opp:command') },
 ];
 
-// The button is disabled until the search stages something, so the menu is
-// only ever opened with a card to act on.
-$('menu-card').addEventListener('click', (e) => openMenu(e.currentTarget, cardMenu()));
+// The slot is acted on exactly like a card on the table: a right-click drops
+// its menu at the pointer, and — since the slot is hidden while empty — this
+// can only fire on a card actually staged there.
+stagedEl.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  openMenu(stagedEl, cardMenu(), { x: e.clientX, y: e.clientY });
+});
+
+// Enter opens the same menu hanging under the slot, the same contract a card
+// on the table has. Guarded to the slot itself so enter on the × discards
+// rather than opening a menu behind it.
+stagedEl.addEventListener('keydown', (e) => {
+  if (e.target !== stagedEl) return;
+  if (e.key === 'Enter' || e.key === 'ContextMenu') { e.preventDefault(); openMenu(stagedEl, cardMenu()); }
+});
 
 $('new-cancel').addEventListener('click', () => dialog.close());
 

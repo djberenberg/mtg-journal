@@ -54,7 +54,7 @@ try {
   const stage = async (name) => { await evalJs(`document.getElementById('q').focus()`); await type(name); await key('Enter', 'Enter', 13); await sleep(300); };
   const toHand = async (name) => { await stage(name); await key('Enter', 'Enter', 13); await sleep(150); };
   const oppPlays = async (name) => { await stage(name); await key('Enter', 'Enter', 13, 8); await sleep(150); };
-  const stagedUi = () => evalJs(`({hidden: document.getElementById('staged').hidden, name: document.getElementById('staged-name').textContent, img: document.getElementById('staged-img').getAttribute('src'), disabled: document.getElementById('menu-card').disabled})`);
+  const stagedUi = () => evalJs(`({hidden: document.getElementById('staged').hidden, name: document.getElementById('staged-name').textContent, img: document.getElementById('staged-img').getAttribute('src'), label: document.getElementById('staged').getAttribute('aria-label')})`);
   const mouse = (type, x, y, buttons = 1) => send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons, clickCount: 1 });
   const click = (sel) => evalJs(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});if(!e)return 'missing';e.click();return 'ok'})()`);
   const shot = async (name) => writeFileSync(join(out, `${name}.png`), Buffer.from((await send('Page.captureScreenshot')).result.data, 'base64'));
@@ -116,7 +116,7 @@ try {
   let o = await oppUi();
   check('one opponent: no tabs and a plain "opponent"; the search form is down to its look up button', o.tabsHidden && o.name === 'opponent' && (await evalJs(`[...document.querySelectorAll('#search button')].map(b=>b.textContent+':'+b.type).join('|')`)) === 'look up:submit', JSON.stringify(o));
   st = await stagedUi();
-  check('nothing is staged to begin with: the slot is away and the card button is disabled', st.hidden && st.disabled, JSON.stringify(st));
+  check('nothing is staged to begin with: the slot is away', st.hidden, JSON.stringify(st));
   check('the opponent\'s hand pile is hidden while empty', await evalJs(`document.querySelector('[data-pile="opp:hand"]').hidden`));
   check('both sides have a command zone', (await evalJs(`document.querySelectorAll('.zone[data-zone="command"]').length`)) === 2);
 
@@ -145,11 +145,11 @@ try {
   check('enter takes the suggestion into the box and closes the list, adding nothing yet', u.q === 'Lightning Bolt' && u.suggestHidden && (await state()).cards.length === 0, JSON.stringify({ q: u.q, hidden: u.suggestHidden }));
   await key('Enter', 'Enter', 13); await sleep(300); u = await ui();
   st = await stagedUi();
-  check('enter again looks it up and stages it: the slot shows its name and picture, the box clears, and the card button wakes up', !st.hidden && st.name === 'Lightning Bolt' && /^https:\/\/cards\.scryfall\.io\//.test(st.img) && !st.disabled && u.q === '' && /Lightning Bolt — choose from card/.test(u.status) && !u.error, JSON.stringify({ st, status: u.status }));
+  check('enter again looks it up and stages it: the slot shows its name and picture, named for a screen reader as staged, and the box clears', !st.hidden && st.name === 'Lightning Bolt' && /^https:\/\/cards\.scryfall\.io\//.test(st.img) && st.label === 'Lightning Bolt, staged' && u.q === '' && /Lightning Bolt — right-click it to place it/.test(u.status) && !u.error, JSON.stringify({ st, status: u.status }));
   check('staging puts nothing on the table and nothing in the log', (await state()).cards.length === 0 && u.log.length === 1 && u.undo);
   await key('Enter', 'Enter', 13); await sleep(150); u = await ui(); st = await stagedUi();
   let hand = await zone('me', 'hand');
-  check('a second enter sends it to my hand and empties the slot; the log says so', hand.length === 1 && hand[0].name === 'Lightning Bolt' && st.hidden && st.disabled && /I draw Lightning Bolt/.test(u.log[0]) && /I draw Lightning Bolt/.test(u.status) && !u.error, JSON.stringify({ hand, status: u.status, log: u.log[0] }));
+  check('a second enter sends it to my hand and empties the slot; the log says so', hand.length === 1 && hand[0].name === 'Lightning Bolt' && st.hidden && /I draw Lightning Bolt/.test(u.log[0]) && /I draw Lightning Bolt/.test(u.status) && !u.error, JSON.stringify({ hand, status: u.status, log: u.log[0] }));
   check('undo is enabled now', !u.undo);
 
   // a creature to my hand, played, tapped
@@ -291,42 +291,48 @@ try {
   await menuPick(elvesSel, 'to the battlefield'); await sleep(50);
   await shot('2-table');
 
-  // the card menu: where a staged card can go
+  // the staged card's own menu: right-clicked exactly like a card on the
+  // table, since Task 12 moved it out of the navbar
   const onTable = (await state()).cards.length;
   await evalJs(`document.getElementById('q').focus()`);
   await type('bolt'); await click('#look-up'); await sleep(300);
   st = await stagedUi();
-  check('clicking look up stages the typed card, as enter does: it waits in its slot with nothing added to the table, and the card button is enabled', !st.hidden && st.name === 'Lightning Bolt' && !st.disabled && (await zone('me', 'hand')).length === 0 && (await state()).cards.length === onTable, JSON.stringify(st));
+  check('clicking look up stages the typed card, as enter does: it waits in its slot with nothing added to the table', !st.hidden && st.name === 'Lightning Bolt' && (await zone('me', 'hand')).length === 0 && (await state()).cards.length === onTable, JSON.stringify(st));
   await shot('c-staged');
-  await clickAt('#menu-card');
-  let cm = await menuUi('menu-card');
-  check('the card button opens my hand, the opponent playing it, and both command zones', !cm.hidden && cm.expanded === 'true' && cm.items.map((i) => i.label).join('|') === "send to my hand|opponent plays|send to my command zone|send to opponent's command zone", JSON.stringify(cm));
+  at = await rightClickAt('#staged');
+  items = await menuItems();
+  check('right-clicking the staged card opens its menu at the pointer: my hand, the opponent playing it, and both command zones', items === "send to my hand|opponent plays|send to my command zone|send to opponent's command zone", items);
+  mr = await menuRect();
+  check('the menu opens at the pointer, inside the viewport', Math.abs(mr.left - at.x) <= 1 && (Math.abs(mr.top - at.y) <= 1 || Math.abs(mr.bottom - at.y) <= 1), JSON.stringify({ at, mr }));
+  await key('Escape', 'Escape', 27); await sleep(50);
+  check('escape closes the menu, leaving the card staged', (await el('#menu', 'e.hidden')) && !(await stagedUi()).hidden);
+  await evalJs(`document.getElementById('staged').focus()`);
+  await key('Enter', 'Enter', 13); await sleep(80);
+  check('enter on the focused slot opens the same menu', !(await el('#menu', 'e.hidden')) && (await menuItems()) === "send to my hand|opponent plays|send to my command zone|send to opponent's command zone");
   await pickItem('send to my hand');
   const staysInHand = await zone('me', 'hand');
   check('send to my hand puts it in my hand and empties the slot', staysInHand.length === 1 && staysInHand[0].name === 'Lightning Bolt' && (await stagedUi()).hidden && /I draw Lightning Bolt/.test((await ui()).log[0]), JSON.stringify(staysInHand));
   await menuPick(`.card[data-uid="${staysInHand[0].uid}"]`, 'remove'); await sleep(50);
   await stage('llanowar elves');
-  await clickAt('#menu-card');
-  await pickItem('opponent plays');
+  await menuPick('#staged', 'opponent plays'); await sleep(50);
   const theirField = await zone('opp', 'battlefield');
   const theirElves = theirField.find((c) => c.name === 'Llanowar Elves');
-  check('the opponent-plays item is the opponent playing it: their permanent lands on their battlefield', theirField.length === 2 && theirElves && (await stagedUi()).hidden && /opponent plays Llanowar Elves/.test((await ui()).log[0]), JSON.stringify(theirField));
+  check('opponent plays is the opponent playing it: their permanent lands on their battlefield', theirField.length === 2 && theirElves && (await stagedUi()).hidden && /opponent plays Llanowar Elves/.test((await ui()).log[0]), JSON.stringify(theirField));
   await menuPick(`.card[data-uid="${theirElves.uid}"]`, 'remove'); await sleep(50);
   await stage('bolt');
-  await clickAt('#menu-card');
-  await pickItem('send to my command zone');
+  await menuPick('#staged', 'send to my command zone'); await sleep(50);
   let cmd = await zone('me', 'command');
   st = await stagedUi();
-  check('send to my command zone puts it there wearing the commander mark, and empties the slot', cmd.length === 1 && cmd[0].name === 'Lightning Bolt' && (await el(`.card[data-uid="${cmd[0].uid}"]`, "e.classList.contains('commander')")) && st.hidden && st.disabled && /I put Lightning Bolt in command zone/.test((await ui()).log[0]), JSON.stringify({ cmd, st }));
+  check('send to my command zone puts it there wearing the commander mark, and empties the slot', cmd.length === 1 && cmd[0].name === 'Lightning Bolt' && (await el(`.card[data-uid="${cmd[0].uid}"]`, "e.classList.contains('commander')")) && st.hidden && /I put Lightning Bolt in command zone/.test((await ui()).log[0]), JSON.stringify({ cmd, st }));
   await menuPick(`.card[data-uid="${cmd[0].uid}"]`, 'remove'); await sleep(50);
   // discarded rather than placed
   await stage('bolt');
   await click('#staged-clear'); await sleep(80); st = await stagedUi();
-  check('the × discards the staged card: nothing reaches the table and the card button is disabled again', st.hidden && st.disabled && (await zone('me', 'command')).length === 0 && (await state()).cards.length === onTable && /discarded Lightning Bolt/.test((await ui()).status), JSON.stringify(st));
+  check('the × discards the staged card without opening a menu: nothing reaches the table', st.hidden && (await el('#menu', 'e.hidden')) && (await zone('me', 'command')).length === 0 && (await state()).cards.length === onTable && /discarded Lightning Bolt/.test((await ui()).status), JSON.stringify(st));
   await stage('bolt');
   await key('Escape', 'Escape', 27); await sleep(80);
   st = await stagedUi();
-  check('escape in the empty box discards it too', st.hidden && st.disabled && (await state()).cards.length === onTable, JSON.stringify(st));
+  check('escape in the empty box discards it too', st.hidden && (await state()).cards.length === onTable, JSON.stringify(st));
 
   // copies
   await click(`.card[data-uid="${hand[1].uid}"] img`); await sleep(50); // tap the original first
@@ -554,14 +560,14 @@ try {
   await type('xyzzyplugh'); await key('Enter', 'Enter', 13); await sleep(300); u = await ui();
   check('an unknown name: Scryfall\'s message in the status line, nothing added', u.error && /No cards found/.test(u.status) && (await state()).cards.length === cardCount, u.status);
   st = await stagedUi();
-  check('the box keeps the text for fixing, and nothing is staged', u.q === 'xyzzyplugh' && st.hidden && st.disabled, JSON.stringify(st));
+  check('the box keeps the text for fixing, and nothing is staged', u.q === 'xyzzyplugh' && st.hidden, JSON.stringify(st));
   await evalJs(`document.getElementById('q').value=''`);
 
   // the navbar's game menu
   await clickAt('#menu-game');
   let m = await menuUi();
   check('the game button opens a menu of new game and reset game, each with what it does', !m.hidden && m.expanded === 'true' && m.items.map((i) => i.label).join('|') === 'new game|reset game' && /opponents and life/.test(m.items[0].title) && /same opponents and life/.test(m.items[1].title) && m.roles.every((r) => r === 'menuitem'), JSON.stringify(m));
-  check('the card button is there but disabled until it has a card', (await el('#menu-card', 'e.disabled')) === true);
+  check('the navbar has one button, game, and no card button exists', (await evalJs(`[...document.querySelectorAll('#navbar button')].map(b=>b.id).join('|')`)) === 'menu-game' && (await evalJs(`document.getElementById('menu-card') === null`)));
   const menuBox = JSON.parse(await evalJs(`(()=>{const m=document.getElementById('menu').getBoundingClientRect();const b=document.getElementById('menu-game').getBoundingClientRect();return JSON.stringify({fixed:getComputedStyle(document.getElementById('menu')).position,under:m.top>=b.bottom-1&&Math.abs(m.left-b.left)<1,inView:m.left>=8&&m.top>=8&&m.right<=innerWidth-8&&m.bottom<=innerHeight-8})})()`));
   check('the menu hangs under the button, fixed and inside the viewport', menuBox.fixed === 'fixed' && menuBox.under && menuBox.inView, JSON.stringify(menuBox));
   check('opened with the mouse, the focus waits on the menu, not on an item', m.focus === 'menu');
@@ -616,16 +622,16 @@ try {
   check('back on opponent 1: an empty board and 40 life; opponent 2\'s card is kept, not shown', (await zone('opp', 'battlefield')).length === 0 && o.life === '40' && (await state()).cards.length === 1, JSON.stringify(o));
   await click('#opp-tabs button[data-opp="opp2"]'); await sleep(50);
   check('and it is there again on opponent 2', (await zone('opp', 'battlefield')).length === 1);
-  // the card menu names whoever's tab is up, and is rebuilt when it changes
+  // the staged card's menu names whoever's tab is up, and is rebuilt when it changes
   await stage('bolt');
-  await clickAt('#menu-card');
-  cm = await menuUi('menu-card');
-  check('the card menu names the opponent in view', cm.items.map((i) => i.label).join('|') === "send to my hand|opponent 2 plays|send to my command zone|send to opponent 2's command zone", JSON.stringify(cm.items.map((i) => i.label)));
+  await rightClickAt('#staged');
+  items = await menuItems();
+  check('the staged card\'s menu names the opponent in view', items === "send to my hand|opponent 2 plays|send to my command zone|send to opponent 2's command zone", items);
   await key('Escape', 'Escape', 27); await sleep(50);
   await click('#opp-tabs button[data-opp="opp3"]'); await sleep(50);
-  await clickAt('#menu-card');
-  cm = await menuUi('menu-card');
-  check('and follows the tab: the same staged card now offers opponent 3', cm.items.map((i) => i.label).join('|') === "send to my hand|opponent 3 plays|send to my command zone|send to opponent 3's command zone", JSON.stringify(cm.items.map((i) => i.label)));
+  await rightClickAt('#staged');
+  items = await menuItems();
+  check('and follows the tab: the same staged card now offers opponent 3', items === "send to my hand|opponent 3 plays|send to my command zone|send to opponent 3's command zone", items);
   await pickItem("send to opponent 3's command zone");
   cmd = await zone('opp', 'command');
   check('their command zone item puts it in their command zone, as their commander', cmd.length === 1 && cmd[0].name === 'Lightning Bolt' && (await el(`.card[data-uid="${cmd[0].uid}"]`, "e.classList.contains('commander')")) && (await stagedUi()).hidden && /opponent 3 puts Lightning Bolt in command zone/.test((await ui()).log[0]), JSON.stringify(cmd));

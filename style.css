@@ -243,7 +243,8 @@ h3 { font-size: 0.68rem; }
 
 /* The staged card, on a line of its own under the search box and no wider
    than the box, rather than stretched across the bar. Outlined in the accent,
-   because it is the thing the card menu is about to act on. */
+   because it is the thing a right-click is about to act on — the same
+   affordance a card on the table has. */
 .staged {
   flex-basis: 100%;
   max-width: var(--search-w);
@@ -255,9 +256,11 @@ h3 { font-size: 0.68rem; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   outline: 1px solid var(--accent);
+  cursor: context-menu;
 }
 
 .staged[hidden] { display: none; }
+.staged:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* The ratio is given rather than left to the image, so the row is its full
    height before the picture arrives and does not jump when it does. */

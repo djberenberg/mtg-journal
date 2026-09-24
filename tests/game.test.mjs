@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseCard } from '../scryfall.js';
 import {
-  newGame, addCard, play, toggleTap, moveTo, remove, nextTurn, adjustLife,
+  newGame, addCard, play, toggleTap, moveTo, remove, nextTurn, adjustLife, setLife,
   isPermanent, cardsIn, load, players, label, setOpponents, MAX_OPPONENTS, resetGame,
   parseCounterKind, addCounter, adjustCounter, moveCounter, isLand, copyCard,
 } from '../game.js';
@@ -158,6 +158,38 @@ test('adjustLife changes a total and logs the result', () => {
   assert.equal(adjustLife(g, 'me', 0), g);
 });
 
+test('setLife sets a total outright and logs it', () => {
+  const g = setLife(newGame(), 'me', 34);
+  assert.equal(g.life.me, 34);
+  assert.match(last(g).text, /my life is now 34/);
+});
+
+test('setLife sets a named opponent\'s life, with the possessive label', () => {
+  const g = setLife(newGame({ opponents: 2 }), 'opp2', 12);
+  assert.equal(g.life.opp2, 12);
+  assert.match(last(g).text, /opponent 2's life is now 12/);
+});
+
+test('setLife accepts zero and negative totals: the journal does not enforce the rules', () => {
+  let g = setLife(newGame(), 'me', 0);
+  assert.equal(g.life.me, 0);
+  g = setLife(g, 'me', -5);
+  assert.equal(g.life.me, -5);
+  assert.match(last(g).text, /my life is now -5/);
+});
+
+test('setLife rounds a fractional total', () => {
+  const g = setLife(newGame(), 'me', 33.6);
+  assert.equal(g.life.me, 34);
+});
+
+test('setLife refuses an unknown player, a non-numeric value, or no change', () => {
+  const g = newGame();
+  assert.equal(setLife(g, 'opp2', 10), g, 'not at the table');
+  assert.equal(setLife(g, 'me', 'x'), g, 'not a number');
+  assert.equal(setLife(g, 'me', 20), g, 'already there');
+});
+
 test('every log line carries the turn it happened on', () => {
   let g = nextTurn(addCard(newGame(), ELVES, 'me'));
   g = play(g, only(g, 'me', 'hand').uid);
@@ -202,6 +234,15 @@ test('a game can start with up to three opponents and a chosen life total', () =
   assert.equal(g.startingLife, 40);
   assert.equal(newGame({ opponents: 7 }).opponents, 3, 'clamped');
   assert.equal(newGame({ opponents: 0 }).opponents, 1, 'clamped');
+});
+
+test('newGame clamps a bad or out-of-range life to a sane total', () => {
+  let g = newGame({ life: 40 });
+  assert.deepEqual(g.life, { me: 40, opp1: 40 });
+  assert.match(last(g).text, /40 life/);
+  assert.equal(newGame({ life: 'x' }).startingLife, 20, 'not a number: falls back to 20');
+  assert.equal(newGame({ life: 5000 }).startingLife, 999, 'clamped to the top');
+  assert.equal(newGame({ life: 0 }).startingLife, 1, 'clamped to the bottom, not the 20 fallback');
 });
 
 test('labels: "opponent" alone with one opponent, numbered with more', () => {

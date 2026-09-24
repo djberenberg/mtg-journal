@@ -61,20 +61,27 @@ const patch = (state, uid, changes) => ({
 });
 
 const clampOpponents = (n) => Math.max(1, Math.min(MAX_OPPONENTS, Math.round(Number(n)) || 1));
+// A life total is whatever the table agreed on, not always 20 — but it has
+// to be a real number to seat anyone at.
+const clampLife = (life) => {
+  const n = Number(life);
+  return Math.max(1, Math.min(999, Math.round(Number.isFinite(n) ? n : 20)));
+};
 
 export function newGame({ opponents = 1, life = 20 } = {}) {
   const n = clampOpponents(opponents);
+  const total = clampLife(life);
   const seats = players({ opponents: n });
   return say({
     turn: 1,
     active: 'me',
     opponents: n,
-    startingLife: life,
-    life: Object.fromEntries(seats.map((p) => [p, life])),
+    startingLife: total,
+    life: Object.fromEntries(seats.map((p) => [p, total])),
     cards: [],
     log: [],
     nextUid: 1,
-  }, `new game: ${n} opponent${n === 1 ? '' : 's'}, ${life} life`);
+  }, `new game: ${n} opponent${n === 1 ? '' : 's'}, ${total} life`);
 }
 
 // Start over at the same table: the same seats, the same starting life.
@@ -178,6 +185,18 @@ export function adjustLife(state, player, delta) {
   if (!players(state).includes(player) || !delta) return state;
   const life = { ...state.life, [player]: state.life[player] + delta };
   return say({ ...state, life }, `${who(state, player, delta > 0 ? 'gain' : 'lose')} ${Math.abs(delta)} life (${life[player]})`);
+}
+
+// Set a total outright, for correcting a life total the dialog can type in.
+// Unlike adjustLife this may go negative or to zero: the journal records
+// what happened, it does not enforce the rules.
+export function setLife(state, player, value) {
+  const n = Number(value);
+  if (!players(state).includes(player) || !Number.isFinite(n)) return state;
+  const rounded = Math.round(n);
+  if (rounded === state.life[player]) return state;
+  const life = { ...state.life, [player]: rounded };
+  return say({ ...state, life }, `${label(state, player, 'possessive')} life is now ${rounded}`);
 }
 
 // --- counters ---------------------------------------------------------

@@ -125,10 +125,90 @@ function cardEl(c) {
   // The zone is on the element because the menu and the click handler both
   // ask the card where it is; the label says it out loud for the same reason.
   if (el.dataset.zone !== c.zone) {
+    const from = el.dataset.zone;
+    // Measured where the card still is: render() puts it in its new zone in
+    // the same frame, and the box it lands in is not the one it is leaving.
+    const rect = from && el.isConnected ? el.getBoundingClientRect() : null;
     el.dataset.zone = c.zone;
     el.setAttribute('aria-label', `${c.name}, ${c.zone}`);
+    if (rect?.width) zoneEffect(el, rect, from, c.zone);
   }
   return el;
+}
+
+// --- leaving a zone ---------------------------------------------------
+
+// A card sent to the graveyard is torn up; one sent to exile is warped out
+// of existence. Decoration, all of it: nothing here is game state, so
+// nothing is committed and nothing is saved.
+// The times are the ones the animations in style.css run for; they are
+// here only to know when a ghost that never ended should be swept up.
+const EFFECTS = { graveyard: { effect: 'tear', ms: 620 }, exile: { effect: 'warp', ms: 520 } };
+const ARRIVE_MS = 200;
+const stillness = matchMedia('(prefers-reduced-motion: reduce)');
+
+function zoneEffect(el, rect, from, to) {
+  // A card arriving on the table for the first time was never anywhere to
+  // leave: an opponent's instant, cast straight into their graveyard, does
+  // not tear. One played from hand that resolves there does.
+  if (!from || !EFFECTS[to]) return;
+  if (!stillness.matches) ghost(el, rect, EFFECTS[to]);
+  arrive(el);
+}
+
+// The card element itself is never animated: render() is moving it into its
+// new zone in this same frame, and animating it would fight the layout.
+// What plays is a throwaway copy, fixed over the table where the card was.
+function ghost(el, rect, { effect, ms }) {
+  const src = el.querySelector('img').src;
+  const g = document.createElement('div');
+  g.className = 'ghost';
+  g.dataset.effect = effect;
+  g.ariaHidden = 'true';
+  // A tapped card lies on its side, so the box it leaves is the card's
+  // turned over; the ghost is the upright card, turned the same way.
+  const turned = el.classList.contains('tapped');
+  const w = turned ? rect.height : rect.width;
+  const h = turned ? rect.width : rect.height;
+  g.style.left = `${rect.left + (rect.width - w) / 2}px`;
+  g.style.top = `${rect.top + (rect.height - h) / 2}px`;
+  g.style.width = `${w}px`;
+  g.style.height = `${h}px`;
+  if (turned) g.style.rotate = '90deg';
+  // The card's own src, so the copy is already in the browser's cache and
+  // paints in the frame it is added rather than as a blank box.
+  const copy = () => Object.assign(document.createElement('img'), { src, alt: '' });
+  // The tear is two copies, each clipped to one side of a ragged edge down
+  // the middle; the warp is one, stretched out of the plane.
+  if (effect === 'tear') {
+    for (let i = 0; i < 2; i++) {
+      const half = document.createElement('div');
+      half.className = 'ghost-half';
+      half.append(copy());
+      g.append(half);
+    }
+  } else g.append(copy());
+  document.body.append(g);
+  // Gone when it ends, and gone anyway a little after: a backgrounded tab
+  // never fires animationend, and a ghost left behind would sit over the
+  // table for the rest of the game.
+  const drop = () => { clearTimeout(timer); g.remove(); };
+  const timer = setTimeout(drop, ms + 200);
+  g.addEventListener('animationend', drop);
+}
+
+// The card, now in its new zone, fades in where it lands. The animation is
+// on its image rather than the figure, which is where the zoom under the
+// pointer lives: an animation beats a plain declaration while it runs, so a
+// card arriving under the pointer would drop out of its zoom and snap back
+// into it at the end.
+function arrive(el) {
+  el.classList.remove('arriving');
+  void el.offsetWidth; // a second change of zone plays again rather than being swallowed
+  el.classList.add('arriving');
+  const done = () => { clearTimeout(timer); el.removeEventListener('animationend', done); el.classList.remove('arriving'); };
+  const timer = setTimeout(done, ARRIVE_MS + 200);
+  el.addEventListener('animationend', done);
 }
 
 // The squares on one card, kept by id like the cards themselves. A square

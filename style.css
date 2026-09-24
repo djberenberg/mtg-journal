@@ -486,6 +486,85 @@ h3 { font-size: 0.68rem; }
   white-space: nowrap;
 }
 
+/* --- leaving a zone --------------------------------------------------- */
+
+/* A copy of the card, left over the table where the card itself was while
+   render() moves the card on. Above everything, in the way of nothing, and
+   thrown away by app.js within the second. Its box, and the turn of a card
+   that was lying on its side, are set there too. */
+.ghost {
+  position: fixed;
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* The same shadow the card itself wears, so the copy takes over from it
+   without a blink at the moment it appears. */
+.ghost img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 4.5% / 3.2%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+/* The two sides of the tear. The polygons are each other's complement
+   along a ragged line down the middle, so at rest the halves fit back
+   together exactly and the card looks whole until it comes apart. */
+.ghost-half {
+  position: absolute;
+  inset: 0;
+}
+
+.ghost-half:first-child {
+  clip-path: polygon(0 0, 52% 0, 47% 12%, 53% 26%, 46% 40%, 52% 55%, 47% 70%, 53% 85%, 48% 100%, 0 100%);
+  animation: tear-left 0.62s ease-in both;
+}
+
+.ghost-half:last-child {
+  clip-path: polygon(52% 0, 100% 0, 100% 100%, 48% 100%, 53% 85%, 47% 70%, 52% 55%, 46% 40%, 53% 26%, 47% 12%);
+  animation: tear-right 0.62s ease-in both;
+}
+
+/* Held still while the tear itself reads, then let go: the halves fall
+   away from each other and out of the picture, accelerating as they go. */
+@keyframes tear-left {
+  0%, 12% { transform: none; filter: none; opacity: 1; }
+  100% { transform: translate(-26%, 48%) rotate(-13deg); filter: blur(3px); opacity: 0; }
+}
+
+@keyframes tear-right {
+  0%, 12% { transform: none; filter: none; opacity: 1; }
+  100% { transform: translate(26%, 54%) rotate(15deg); filter: blur(3px); opacity: 0; }
+}
+
+/* Pulled out of the plane rather than shrunk: the card stretches sideways
+   as it collapses onto its own centre line, brightening into the accent as
+   it goes, and is gone at a width of nothing. */
+.ghost[data-effect="warp"] img { animation: warp 0.52s cubic-bezier(0.45, 0, 0.7, 0.2) both; }
+
+@keyframes warp {
+  0% { transform: scale(1, 1); filter: none; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6); opacity: 1; }
+  55% { transform: scale(1.7, 0.22); filter: blur(2px) brightness(1.6); box-shadow: 0 0 28px 6px var(--accent); opacity: 0.85; }
+  100% { transform: scale(2.6, 0.02); filter: blur(7px) brightness(2.4); box-shadow: 0 0 44px 14px transparent; opacity: 0; }
+}
+
+/* Where it lands. On the image, not the figure: the figure carries the
+   zoom under the pointer, and an animation on it would beat that zoom
+   while it ran and hand it back with a jolt at the end. */
+.card.arriving img { animation: card-arrive 0.2s ease-out both; }
+
+@keyframes card-arrive {
+  from { transform: scale(0.92); opacity: 0; }
+}
+
+/* Stillness asked for: nothing is thrown across the table, and the card
+   that landed simply fades up where it is. */
+@media (prefers-reduced-motion: reduce) {
+  .card.arriving img { animation-name: card-fade; }
+  @keyframes card-fade { from { opacity: 0; } }
+}
+
 /* --- counters --------------------------------------------------------- */
 
 /* A layer over the card for its counters. The layer takes no pointer

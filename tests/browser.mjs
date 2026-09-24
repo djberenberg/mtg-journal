@@ -101,6 +101,7 @@ try {
   };
   const unhover = async () => { await mouse('mouseMoved', 4, 4, 0); await sleep(250); };
   const peekUi = (sel = '.card') => evalJs(`(()=>{const p=document.getElementById('peek');const r=p.getBoundingClientRect();const c=document.querySelector(${JSON.stringify(sel)})?.getBoundingClientRect()??{left:0,right:0};return {hidden:p.hidden,text:p.textContent,rows:[...p.children].map(e=>e.className),aria:p.getAttribute('aria-hidden'),fixed:getComputedStyle(p).position,gap:Math.round((r.left-c.right)*10)/10,width:Math.round(r.width),inView:r.left>=8&&r.top>=8&&r.right<=innerWidth-8&&r.bottom<=innerHeight-8}})()`);
+  const ghosts = () => evalJs(`[...document.querySelectorAll('.ghost')].map(g=>({effect:g.dataset.effect, halves:g.querySelectorAll('.ghost-half').length, imgs:g.querySelectorAll('img').length, fixed:getComputedStyle(g).position, events:getComputedStyle(g).pointerEvents, hidden:g.getAttribute('aria-hidden'), running:g.getAnimations({subtree:true}).map(a=>a.animationName).sort()}))`);
   const zoomOf = (sel) => evalJs(`Math.round(new DOMMatrix(getComputedStyle(document.querySelector(${JSON.stringify(sel)})).transform).a * 1000) / 1000`);
   const fieldBoxes = (owner) => evalJs(`(()=>{const z=document.querySelector('.zone[data-owner="${owner}"][data-zone="battlefield"]');return {zone:z.getBoundingClientRect().width,cards:[...z.querySelectorAll('.card')].map(c=>c.getBoundingClientRect().width)}})()`);
   const menuItems = () => evalJs(`[...document.getElementById('menu').children].map(c=>c.tagName==='HR'?'-':c.textContent).join('|')`);
@@ -481,6 +482,37 @@ try {
   await menuPick(elvesSel, 'to the battlefield'); await sleep(50);
   await click('[data-life="me"][data-by="-1"]'); await sleep(50);
   await evalJs(`window.__mo.disconnect()`);
+
+  // leaving a zone: the tear and the warp, looked at while they are running
+  const graves = (await zone('me', 'graveyard')).length;
+  await menuPick(elvesSel, 'to the graveyard'); // 0.62s of tearing: the checks below are mid-animation
+  let gh = await ghosts();
+  check('a card sent to the graveyard is torn up: a ghost of it in two halves, fixed over the table and in nobody\'s way', gh.length === 1 && gh[0].effect === 'tear' && gh[0].halves === 2 && gh[0].imgs === 2 && gh[0].fixed === 'fixed' && gh[0].events === 'none' && gh[0].hidden === 'true' && gh[0].running.join('|') === 'tear-left|tear-right', JSON.stringify(gh));
+  check('the card itself is in the graveyard already, not waiting on the animation, and the pile has counted it', (await zone('me', 'graveyard')).length === graves + 1 && (await zone('me', 'battlefield')).length === 0 && (await evalJs(`document.querySelector('[data-count="me:graveyard"]').textContent`)) === String(graves + 1) && (await el(elvesSel, "e.classList.contains('arriving')")) && (await evalJs(`document.querySelector('${elvesSel}').getAnimations({subtree:true}).map(a=>a.animationName).join('|')`)) === 'card-arrive', JSON.stringify({ graves }));
+  await shot('c-tear');
+  await sleep(900);
+  check('the ghost is gone within a second, and the card it came from has stopped arriving', (await ghosts()).length === 0 && !(await el(elvesSel, "e.classList.contains('arriving')")));
+  await menuPick(elvesSel, 'to exile');
+  gh = await ghosts();
+  check('a card sent to exile is warped instead: one ghost, one copy of the card, no halves', gh.length === 1 && gh[0].effect === 'warp' && gh[0].halves === 0 && gh[0].imgs === 1 && gh[0].running.join('|') === 'warp', JSON.stringify(gh));
+  check('and it is in exile already, counted there', (await zone('me', 'exile')).length === 1 && (await evalJs(`document.querySelector('[data-count="me:exile"]').textContent`)) === '1');
+  await shot('d-warp');
+  await sleep(900);
+  check('that ghost goes the same way', (await ghosts()).length === 0);
+  await menuPick(elvesSel, 'to hand'); await sleep(50);
+  check('a card moved to the hand is neither torn nor warped', (await ghosts()).length === 0 && (await zone('me', 'hand')).length === 1);
+  await menuPick(elvesSel, 'to the battlefield'); await sleep(50);
+  check('nor is one moved to the battlefield', (await ghosts()).length === 0 && (await zone('me', 'battlefield')).length === 1);
+  // and with stillness asked for, nothing is thrown across the table at all
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await menuPick(elvesSel, 'to the graveyard');
+  check('asked for reduced motion, no ghost is made at all, and the card that landed only fades up where it is', (await ghosts()).length === 0 && (await evalJs(`document.querySelector('${elvesSel}').getAnimations({subtree:true}).map(a=>a.animationName).join('|')`)) === 'card-fade');
+  await send('Emulation.setEmulatedMedia', { features: [] });
+  await menuPick(elvesSel, 'to the battlefield'); await sleep(50);
+
+  const theirGraves = (await zone('opp', 'graveyard')).length;
+  await oppPlays('lightning bolt');
+  check('an opponent\'s instant, cast straight into their graveyard, was never anywhere to leave and makes no ghost', (await ghosts()).length === 0 && (await zone('opp', 'graveyard')).length === theirGraves + 1, JSON.stringify({ theirGraves }));
 
   // the opponent's creature, after my card has been through the picker and a zone change
   const delverSel = `.card[data-uid="${theirs[0].uid}"]`;

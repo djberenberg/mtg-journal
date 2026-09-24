@@ -72,12 +72,16 @@ function show(opp) {
 // already in the tree moves it, which also puts each zone in state order.
 const cardEls = new Map();
 
-function describe(c) {
-  const lines = [`${c.name}  ${c.manaCost}`.trim(), c.typeLine];
-  if (c.oracleText) lines.push('', c.oracleText);
-  if (c.power != null) lines.push('', `${c.power}/${c.toughness}`);
-  else if (c.loyalty != null) lines.push('', `loyalty ${c.loyalty}`);
-  return lines.join('\n');
+// What a card says, in parts rather than one blob of text: the panel gives
+// each its own row, and leaves out the ones this card has nothing for.
+function details(c) {
+  return {
+    name: c.name,
+    manaCost: c.manaCost ?? '',
+    typeLine: c.typeLine ?? '',
+    oracleText: c.oracleText ?? '',
+    stats: c.power != null ? `${c.power}/${c.toughness}` : c.loyalty != null ? `loyalty ${c.loyalty}` : null,
+  };
 }
 
 function cardEl(c) {
@@ -86,7 +90,6 @@ function cardEl(c) {
     el = document.createElement('figure');
     el.className = 'card';
     el.dataset.uid = c.uid;
-    el.title = describe(c);
     // The card is its own control now that the strip of buttons is gone: it
     // takes the focus, so what a mouse reaches by right-clicking a key
     // reaches by pressing enter. Not a button, though it acts like one: a
@@ -94,6 +97,8 @@ function cardEl(c) {
     // and − on its counters away from a screen reader.
     el.tabIndex = 0;
     el.role = 'group';
+    // Enter opens a menu, and nothing else on the card says so.
+    el.ariaHasPopup = 'menu';
     const img = document.createElement('img');
     img.src = c.image;
     img.alt = c.name;
@@ -184,6 +189,9 @@ function render() {
   for (const [uid, el] of cardEls) {
     if (!seen.has(uid)) { el.remove(); cardEls.delete(uid); }
   }
+  // A card that has gone — removed, or another opponent's — leaves the
+  // panel about it beside nothing.
+  if (peekCard && !peekCard.isConnected) hidePeek();
   if (hadFocus?.isConnected && document.activeElement === document.body) hadFocus.focus({ preventScroll: true });
 
   for (const el of document.querySelectorAll('[data-count]')) {
@@ -357,6 +365,7 @@ function openMenu(opener, items, at) {
   // asked for at a pointer moves to the new one, as a context menu does.
   if (opener === menuOpener && !at) { closeMenu(); return; }
   closeMenu();
+  hidePeek(); // whatever the menu is about, it is not the card's text
   menuOpener = opener;
   menu.replaceChildren(...items.map((it) => {
     if (it === '-') {
@@ -437,9 +446,9 @@ document.addEventListener('click', (e) => {
   if (menuOpen() && !menu.contains(e.target) && !menuOpener.contains(e.target)) closeMenu();
 });
 
-// The popup is fixed where it was put, so it would be left behind.
-window.addEventListener('scroll', () => closeMenu(), true);
-window.addEventListener('resize', () => closeMenu());
+// Both popups are fixed where they were put, so they would be left behind.
+window.addEventListener('scroll', () => { closeMenu(); hidePeek(); }, true);
+window.addEventListener('resize', () => { closeMenu(); hidePeek(); });
 
 // --- the card menu ----------------------------------------------------
 
@@ -498,6 +507,86 @@ table.addEventListener('keydown', (e) => {
   e.preventDefault(); // space scrolls the page, enter would not, but both are ours
 });
 
+// --- the hover panel --------------------------------------------------
+
+// What the card under the pointer says, beside it. The browser's own
+// tooltip said the same thing, a second late and in the system's font.
+// View only: never committed, and not worth saving either.
+const peek = $('peek');
+const PEEK_EDGE = 8; // the gap from the card, and from the viewport's edges
+const CARD_ZOOM = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--card-zoom')) || 1;
+let peekCard = null; // the card element it describes, and null when it is away
+
+function showPeek(card) {
+  const c = game.cards.find((x) => x.uid === card.dataset.uid);
+  if (!c) return;
+  const d = details(c);
+  const name = document.createElement('div');
+  name.className = 'peek-name';
+  name.append(Object.assign(document.createElement('span'), { textContent: d.name }));
+  if (d.manaCost) name.append(Object.assign(document.createElement('span'), { className: 'cost', textContent: d.manaCost }));
+  const rows = [name];
+  for (const [cls, text] of [['peek-type', d.typeLine], ['peek-text', d.oracleText], ['peek-stats', d.stats]]) {
+    if (text) rows.push(Object.assign(document.createElement('div'), { className: cls, textContent: text }));
+  }
+  peek.replaceChildren(...rows);
+  peekCard = card;
+  peek.hidden = false;
+  placePeek(); // measured filled and shown, or it has no size yet
+}
+
+function hidePeek() {
+  if (!peekCard) return;
+  peekCard = null;
+  peek.hidden = true;
+  peek.replaceChildren();
+}
+
+// The card grows under the pointer, and is still growing when the pointer
+// arrives; so the panel is placed beside the box the card ends at, whose
+// centre is where its box is now and whose size is the laid-out one zoomed.
+function grownBox(el) {
+  const r = el.getBoundingClientRect();
+  const s = getComputedStyle(el);
+  const w = parseFloat(s.width) * CARD_ZOOM;
+  const h = parseFloat(s.height) * CARD_ZOOM;
+  const left = r.left + (r.width - w) / 2;
+  const top = r.top + (r.height - h) / 2;
+  return { left, top, right: left + w };
+}
+
+// To the right of the card, or its left when the viewport has no room
+// there; kept on screen either way.
+function placePeek() {
+  // Measured in the top corner, where nothing squeezes it; the place it
+  // ends up is worked out from that size.
+  peek.style.left = `${PEEK_EDGE}px`;
+  peek.style.top = `${PEEK_EDGE}px`;
+  const box = peek.getBoundingClientRect();
+  const r = grownBox(peekCard);
+  const vw = document.documentElement.clientWidth;
+  const vh = document.documentElement.clientHeight;
+  const right = r.right + PEEK_EDGE;
+  const x = right + box.width > vw - PEEK_EDGE ? r.left - PEEK_EDGE - box.width : right;
+  peek.style.left = `${Math.max(PEEK_EDGE, x)}px`;
+  peek.style.top = `${Math.max(PEEK_EDGE, Math.min(r.top, vh - PEEK_EDGE - box.height))}px`;
+}
+
+// A finger has no hover: on a touch the panel would appear under the tap
+// and stay there with nothing to move away.
+table.addEventListener('pointerover', (e) => {
+  // A menu is up to be chosen from; a panel over it, or over the card it
+  // belongs to, is in the way.
+  if (e.pointerType === 'touch' || menuOpen()) return;
+  const card = e.target.closest('.card');
+  // Crossing from the image onto a counter is not arriving at a new card.
+  if (card && card !== peekCard) showPeek(card);
+});
+
+table.addEventListener('pointerout', (e) => {
+  if (e.relatedTarget?.closest('.card') !== peekCard) hidePeek();
+});
+
 // --- counters ---------------------------------------------------------
 
 const pick = $('ctr-pick');
@@ -546,15 +635,21 @@ table.addEventListener('pointerdown', (e) => {
   const sq = e.target.closest('.counter');
   if (!sq || e.target.closest('button') || e.button !== 0) return;
   const layer = sq.parentElement;
-  drag = { sq, layer, uid: sq.closest('.card').dataset.uid, startX: e.clientX, startY: e.clientY, left: sq.offsetLeft, top: sq.offsetTop, moved: false };
+  const card = sq.closest('.card');
+  // The card the square is on is scaled up under the pointer, so a pixel of
+  // pointer travel is less than a pixel of the square's own box; without
+  // this the square would run ahead of the pointer dragging it. The size it
+  // is heading for, not the one it has: the growing may still be under way.
+  const scale = card.matches(':hover') ? CARD_ZOOM : 1;
+  drag = { sq, layer, uid: card.dataset.uid, scale, startX: e.clientX, startY: e.clientY, left: sq.offsetLeft, top: sq.offsetTop, moved: false };
   sq.setPointerCapture?.(e.pointerId);
   e.preventDefault();
 });
 
 table.addEventListener('pointermove', (e) => {
   if (!drag) return;
-  const dx = e.clientX - drag.startX;
-  const dy = e.clientY - drag.startY;
+  const dx = (e.clientX - drag.startX) / drag.scale;
+  const dy = (e.clientY - drag.startY) / drag.scale;
   if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 3) return;
   drag.moved = true;
   drag.sq.classList.add('dragging');

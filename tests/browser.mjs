@@ -83,6 +83,19 @@ try {
     return p;
   };
   const menuPick = async (sel, label) => ((await rightClickAt(sel)) ? pickItem(label) : 'missing');
+  // Hover is the browser's own, so the pointer has to really be moved onto
+  // the card; and away again, to somewhere no card is.
+  const hover = async (sel) => {
+    if (!(await evalJs(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});if(!e)return false;e.scrollIntoView({block:'center'});return true})()`))) return null;
+    await sleep(150);
+    const p = JSON.parse(await evalJs(`(()=>{const r=document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect();return JSON.stringify({x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)})})()`));
+    await mouse('mouseMoved', p.x, p.y, 0);
+    await sleep(250); // the card takes 0.12s to grow
+    return p;
+  };
+  const unhover = async () => { await mouse('mouseMoved', 4, 4, 0); await sleep(250); };
+  const peekUi = (sel = '.card') => evalJs(`(()=>{const p=document.getElementById('peek');const r=p.getBoundingClientRect();const c=document.querySelector(${JSON.stringify(sel)})?.getBoundingClientRect()??{left:0,right:0};return {hidden:p.hidden,text:p.textContent,rows:[...p.children].map(e=>e.className),aria:p.getAttribute('aria-hidden'),fixed:getComputedStyle(p).position,gap:Math.round((r.left-c.right)*10)/10,width:Math.round(r.width),inView:r.left>=8&&r.top>=8&&r.right<=innerWidth-8&&r.bottom<=innerHeight-8}})()`);
+  const fieldBoxes = (owner) => evalJs(`(()=>{const z=document.querySelector('.zone[data-owner="${owner}"][data-zone="battlefield"]');return {zone:z.getBoundingClientRect().width,cards:[...z.querySelectorAll('.card')].map(c=>c.getBoundingClientRect().width)}})()`);
   const menuItems = () => evalJs(`[...document.getElementById('menu').children].map(c=>c.tagName==='HR'?'-':c.textContent).join('|')`);
   const menuRect = () => evalJs(`document.getElementById('menu').getBoundingClientRect().toJSON()`);
   const cardRect = (sel) => evalJs(`document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect().toJSON()`);
@@ -170,7 +183,16 @@ try {
   let theirs = await zone('opp', 'battlefield');
   check('shift+enter: the opponent plays it, straight onto their battlefield', theirs.length === 1 && theirs[0].name === 'Delver of Secrets // Insectile Aberration' && /opponent plays Delver/.test((await ui()).log[0]), JSON.stringify(theirs));
   check('a double-faced card shows its front face', await evalJs(`document.querySelector('.zone[data-owner="opp"][data-zone="battlefield"] img').src.includes('/front/')`));
-  check('hovering a card describes it: cost, type, text', await evalJs(`(()=>{const t=document.querySelector('.zone[data-owner="opp"][data-zone="battlefield"] .card').title;return t.includes('{U}')&&t.includes('Creature — Human Wizard')&&t.includes('Insectile Aberration')})()`));
+  // hovering: the panel of card text, and the card itself a little bigger
+  const delverOnField = '.zone[data-owner="opp"][data-zone="battlefield"] .card';
+  await hover(delverOnField);
+  let pk = await peekUi(delverOnField);
+  check('hovering a card describes it: name, cost, type, text, and its stats, a row each', !pk.hidden && pk.rows.join('|') === 'peek-name|peek-type|peek-text|peek-stats' && pk.text.includes('Delver of Secrets') && pk.text.includes('{U}') && pk.text.includes('Creature — Human Wizard') && pk.text.includes('Insectile Aberration') && pk.text.endsWith('1/1'), JSON.stringify(pk));
+  check('the panel sits beside the card, on screen, and out of a screen reader\'s way', pk.fixed === 'fixed' && Math.abs(pk.gap - 8) <= 1 && pk.inView && pk.width > 200 && pk.aria === 'true', JSON.stringify(pk));
+  check('no card carries the browser\'s own tooltip any more, and each says it opens a menu', (await evalJs(`document.querySelectorAll('.card[title]').length`)) === 0 && (await el(delverOnField, "e.getAttribute('aria-haspopup')")) === 'menu');
+  await shot('b-hover');
+  await unhover();
+  check('moving off the card puts the panel away', (await peekUi(delverOnField)).hidden);
   await type('lightning bolt'); await click('#add-opp'); await sleep(300);
   check('the opponent-plays button sends their instant to their graveyard', (await zone('opp', 'graveyard')).length === 1 && (await zone('opp', 'battlefield')).length === 1 && (await evalJs(`document.querySelector('[data-count="opp:graveyard"]').textContent`)) === '1');
   await click(`.card[data-uid="${theirs[0].uid}"] img`); await sleep(100);
@@ -191,7 +213,8 @@ try {
   await rightClickAt(elvesSel);
   items = await menuItems();
   check('a card on the battlefield offers counters and every other zone, and no play', items === 'copy|add counter…|-|to hand|to the graveyard|to exile|to the command zone|-|remove', items);
-  check('remove and copy say what they do', (await evalJs(`[...document.querySelectorAll('#menu [role="menuitem"]')].map(b=>b.title).join('|')`)).includes('never there (a mistake)'));
+  const menuTitles = await evalJs(`[...document.querySelectorAll('#menu [role="menuitem"]')].map(b=>b.title).join('|')`);
+  check('remove and copy say what they do', menuTitles.includes('never there (a mistake)') && menuTitles.includes('another of this card, beside it'), menuTitles);
   await pickItem('to exile'); await sleep(50);
   check('a battlefield card can be exiled from its menu', (await zone('me', 'exile')).length === 1 && (await zone('me', 'battlefield')).length === 0);
   await menuPick(elvesSel, 'to the battlefield'); await sleep(50);
@@ -225,6 +248,13 @@ try {
   await menuPick(`.card[data-uid="${theirs[0].uid}"]`, 'copy'); await sleep(50);
   check('the opponent\'s card copies too, logged as theirs', (await zone('opp', 'battlefield')).length === 2 && /opponent copies Delver/.test((await ui()).log[0]));
   await shot('9-copies');
+  // the zoom: bigger under the pointer, and nothing around it moves
+  await unhover();
+  const restingBoxes = await fieldBoxes('opp');
+  await hover(`.card[data-uid="${(await zone('opp', 'battlefield'))[0].uid}"]`);
+  const zoomedBoxes = await fieldBoxes('opp');
+  check('the card under the pointer is drawn bigger, while its neighbour and the zone stay as they were', zoomedBoxes.cards[0] > restingBoxes.cards[0] + 3 && Math.abs(zoomedBoxes.cards[1] - restingBoxes.cards[1]) < 0.5 && Math.abs(zoomedBoxes.zone - restingBoxes.zone) < 0.5, JSON.stringify({ resting: restingBoxes, zoomed: zoomedBoxes }));
+  await unhover();
   await menuPick(`.card[data-uid="${copyUid}"]`, 'remove'); await sleep(50);
   await menuPick(`.card[data-uid="${(await zone('opp', 'battlefield'))[1].uid}"]`, 'remove'); await sleep(50);
   await click(`.card[data-uid="${hand[1].uid}"] img`); await sleep(50); // untap the original again
@@ -280,13 +310,16 @@ try {
   check('− three times removes the square; lore stays', sq.length === 1 && sq[0].k === 'lore' && /I remove a \+1\/\+1 counter from Llanowar Elves \(0\)/.test((await ui()).log[0]), JSON.stringify(sq));
   check('the card was not tapped by any of that', !(await zone('me', 'battlefield'))[0].tapped);
 
-  // dragging
+  // dragging. Measured either side of the drag with the card's zoom
+  // settled: a commit re-draws the card under the pointer, which sets it
+  // growing again, and a square on a card half-grown is not where it lands.
+  await sleep(250);
   const cardBox = JSON.parse(await evalJs(`JSON.stringify(document.querySelector('${elvesSel}').getBoundingClientRect())`));
   let p0 = JSON.parse(await evalJs(`(()=>{const r=document.querySelector('${elvesSel} .counter').getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2,w:r.width,h:r.height})})()`));
   await mouse('mousePressed', p0.x, p0.y);
   for (let i = 1; i <= 8; i++) await mouse('mouseMoved', p0.x + 5 * i, p0.y + 8 * i);
   const during = JSON.parse(await evalJs(`(()=>{const s=document.querySelector('${elvesSel} .counter');return JSON.stringify({dragging:s.classList.contains('dragging'),left:s.style.left})})()`));
-  await mouse('mouseReleased', p0.x + 40, p0.y + 64, 0); await sleep(80);
+  await mouse('mouseReleased', p0.x + 40, p0.y + 64, 0); await sleep(250);
   let p1 = JSON.parse(await evalJs(`(()=>{const r=document.querySelector('${elvesSel} .counter').getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2})})()`));
   let ks = await counterState();
   check('a square drags with the pointer and is committed where it was let go', during.dragging && during.left.endsWith('px') && Math.abs(p1.x - (p0.x + 40)) <= 1 && Math.abs(p1.y - (p0.y + 64)) <= 1 && ks[0].x > 0.1 && ks[0].y > 0.2, JSON.stringify({ during, from: p0, to: p1, saved: [ks[0].x, ks[0].y] }));

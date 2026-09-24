@@ -17,6 +17,9 @@
      inherited as the full size and squash the smaller cards. */
   --card-w: 7rem;
   --pile-w: 3.5rem;
+  /* How much bigger a card is under the pointer. app.js reads it, to put
+     the panel beside the size the card ends at. */
+  --card-zoom: 1.06;
   --radius: 10px;
 }
 
@@ -166,6 +169,41 @@ h3 { font-size: 0.68rem; }
 .menu button:focus-visible { outline-offset: -2px; }
 .menu hr { margin: 0.25rem 0; border: 0; border-top: 1px solid var(--border); }
 
+/* What the card under the pointer says, put beside it by app.js. It is
+   there to be read and nothing else: the pointer goes straight through to
+   the cards underneath, which would otherwise flicker as it passed. */
+.peek {
+  position: fixed;
+  z-index: 4;
+  width: 17rem;
+  max-width: calc(100vw - 16px);
+  padding: 0.5rem 0.6rem;
+  font-size: 0.8rem;
+  pointer-events: none;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+.peek-name {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
+.peek-name .cost {
+  flex-shrink: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
+}
+
+.peek-type { margin-top: 0.1rem; font-size: 0.75rem; color: var(--muted); }
+/* Rules arrive one to a line, and reminder text after a blank one. */
+.peek-text { margin-top: 0.45rem; white-space: pre-wrap; }
+.peek-stats { margin-top: 0.45rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+
 /* A thin row of text-like buttons above the search, quiet until they are
    reached for or their menu is up. */
 .navbar { flex-basis: 100%; display: flex; gap: 0.1rem; }
@@ -314,13 +352,18 @@ h3 { font-size: 0.68rem; }
   height: var(--card-h);
   margin: 0;
   flex-shrink: 0;
-  transition: width 0.15s ease, height 0.15s ease;
+  transition: width 0.15s ease, height 0.15s ease, transform 0.12s ease;
   /* A right-click is what a card is for, and the pointer says so wherever
      a left click does not already tap. */
   cursor: context-menu;
 }
 
 .card.tapped { width: var(--card-h); height: var(--card-w); }
+
+/* A little bigger under the pointer, and over its neighbours while it is.
+   The box is scaled rather than widened, so the row behind it does not
+   shuffle along, and a tapped card keeps the rotation on its image. */
+.card:hover { transform: scale(var(--card-zoom)); z-index: 3; }
 
 .card img {
   display: block;

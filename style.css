@@ -17,6 +17,8 @@
      inherited as the full size and squash the smaller cards. */
   --card-w: 7rem;
   --pile-w: 3.5rem;
+  /* The search field, and the staged slot that lines up under it. */
+  --search-w: 24rem;
   /* How much bigger a card is under the pointer. app.js reads it, to put
      the panel beside the size the card ends at. */
   --card-zoom: 1.06;
@@ -97,7 +99,7 @@ h3 { font-size: 0.68rem; }
 
 .search {
   display: flex;
-  flex: 1 1 24rem;
+  flex: 1 1 var(--search-w);
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 0.5rem;
@@ -240,11 +242,11 @@ h3 { font-size: 0.68rem; }
 #log-toggle[aria-expanded="true"]::after { content: " ▾"; }
 
 /* The staged card, on a line of its own under the search box and no wider
-   than it, rather than stretched across the bar. Outlined in the accent,
+   than the box, rather than stretched across the bar. Outlined in the accent,
    because it is the thing the card menu is about to act on. */
 .staged {
   flex-basis: 100%;
-  max-width: 24rem; /* the search field's own basis */
+  max-width: var(--search-w);
   display: flex;
   align-items: center;
   gap: 0.5rem;

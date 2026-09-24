@@ -354,7 +354,7 @@ q.addEventListener('keydown', (e) => {
   // takes two keystrokes, as it did when enter added one outright.
   const waiting = staged && q.value.trim() === '';
   if (e.key === 'Enter' && waiting) { e.preventDefault(); place(e.shiftKey ? 'opp:play' : 'me:hand'); return; }
-  if (e.key === 'Escape' && waiting) { discard(); return; }
+  if (e.key === 'Escape' && waiting) { e.preventDefault(); discard(); return; }
   // With something typed, either enter stages it; the destination comes after.
   if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); stage(); return; }
   if (suggest.hidden) return;

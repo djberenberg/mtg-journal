@@ -112,7 +112,7 @@ try {
   check('a fresh page: turn 1, my turn, 20/20, one log line, undo disabled, search focused', u.turn === 'turn 1 · my turn' && u.me === '20' && u.opp === '20' && u.log.length === 1 && /1 opponent, 20 life/.test(u.log[0]) && u.undo && await evalJs(`document.activeElement.id`) === 'q', JSON.stringify(u));
   check('dark theme: the page background is dark and the text light', await evalJs(`(()=>{const b=getComputedStyle(document.body);const lum=(c)=>{const [r,g,bl]=c.match(/\\d+/g).map(Number);return (r+g+bl)/3};return lum(b.backgroundColor)<40&&lum(b.color)>200&&getComputedStyle(document.documentElement).colorScheme==='dark'})()`));
   let o = await oppUi();
-  check('one opponent: no tabs and a plain "opponent"; the search form has no add buttons left', o.tabsHidden && o.name === 'opponent' && (await evalJs(`document.querySelectorAll('#search button').length`)) === 0, JSON.stringify(o));
+  check('one opponent: no tabs and a plain "opponent"; the search form is down to its look up button', o.tabsHidden && o.name === 'opponent' && (await evalJs(`[...document.querySelectorAll('#search button')].map(b=>b.textContent+':'+b.type).join('|')`)) === 'look up:submit', JSON.stringify(o));
   st = await stagedUi();
   check('nothing is staged to begin with: the slot is away and the card button is disabled', st.hidden && st.disabled, JSON.stringify(st));
   check('the opponent\'s hand pile is hidden while empty', await evalJs(`document.querySelector('[data-pile="opp:hand"]').hidden`));
@@ -254,13 +254,27 @@ try {
 
   // the card menu: where a staged card can go
   const onTable = (await state()).cards.length;
-  await stage('bolt');
+  await evalJs(`document.getElementById('q').focus()`);
+  await type('bolt'); await click('#look-up'); await sleep(300);
   st = await stagedUi();
-  check('a staged card waits in its slot with nothing added to the table, and the card button is enabled', !st.hidden && st.name === 'Lightning Bolt' && !st.disabled && (await zone('me', 'hand')).length === 0 && (await state()).cards.length === onTable, JSON.stringify(st));
+  check('clicking look up stages the typed card, as enter does: it waits in its slot with nothing added to the table, and the card button is enabled', !st.hidden && st.name === 'Lightning Bolt' && !st.disabled && (await zone('me', 'hand')).length === 0 && (await state()).cards.length === onTable, JSON.stringify(st));
   await shot('c-staged');
   await clickAt('#menu-card');
   let cm = await menuUi('menu-card');
   check('the card button opens my hand, the opponent playing it, and both command zones', !cm.hidden && cm.expanded === 'true' && cm.items.map((i) => i.label).join('|') === "send to my hand|opponent plays|send to my command zone|send to opponent's command zone", JSON.stringify(cm));
+  await pickItem('send to my hand');
+  const staysInHand = await zone('me', 'hand');
+  check('send to my hand puts it in my hand and empties the slot', staysInHand.length === 1 && staysInHand[0].name === 'Lightning Bolt' && (await stagedUi()).hidden && /I draw Lightning Bolt/.test((await ui()).log[0]), JSON.stringify(staysInHand));
+  await menuPick(`.card[data-uid="${staysInHand[0].uid}"]`, 'remove'); await sleep(50);
+  await stage('llanowar elves');
+  await clickAt('#menu-card');
+  await pickItem('opponent plays');
+  const theirField = await zone('opp', 'battlefield');
+  const theirElves = theirField.find((c) => c.name === 'Llanowar Elves');
+  check('the opponent-plays item is the opponent playing it: their permanent lands on their battlefield', theirField.length === 2 && theirElves && (await stagedUi()).hidden && /opponent plays Llanowar Elves/.test((await ui()).log[0]), JSON.stringify(theirField));
+  await menuPick(`.card[data-uid="${theirElves.uid}"]`, 'remove'); await sleep(50);
+  await stage('bolt');
+  await clickAt('#menu-card');
   await pickItem('send to my command zone');
   let cmd = await zone('me', 'command');
   st = await stagedUi();

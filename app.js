@@ -72,16 +72,6 @@ function show(opp) {
 // already in the tree moves it, which also puts each zone in state order.
 const cardEls = new Map();
 
-const ACTIONS = {
-  hand: [['play', 'play'], ['copy', 'copy'], ['move', 'graveyard', 'grave'], ['move', 'exile', 'exile'], ['move', 'command', 'cmd'], ['remove', '×']],
-  battlefield: [['counter', 'ctr'], ['copy', 'copy'], ['move', 'graveyard', 'grave'], ['move', 'exile', 'exile'], ['move', 'hand', 'hand'], ['move', 'command', 'cmd'], ['remove', '×']],
-  graveyard: [['copy', 'copy'], ['move', 'battlefield', 'field'], ['move', 'hand', 'hand'], ['move', 'exile', 'exile'], ['move', 'command', 'cmd'], ['remove', '×']],
-  exile: [['counter', 'ctr'], ['copy', 'copy'], ['move', 'battlefield', 'field'], ['move', 'hand', 'hand'], ['move', 'graveyard', 'grave'], ['move', 'command', 'cmd'], ['remove', '×']],
-  command: [['counter', 'ctr'], ['copy', 'copy'], ['move', 'battlefield', 'field'], ['move', 'hand', 'hand'], ['move', 'graveyard', 'grave'], ['remove', '×']],
-};
-const ACTION_TITLE = { play: 'play', remove: 'remove (a mistake)', counter: 'add a counter', copy: 'another of this card, beside it' };
-const ZONE_TITLE = { battlefield: 'to the battlefield', hand: 'to hand', graveyard: 'to the graveyard', exile: 'to exile', command: 'to the command zone' };
-
 function describe(c) {
   const lines = [`${c.name}  ${c.manaCost}`.trim(), c.typeLine];
   if (c.oracleText) lines.push('', c.oracleText);
@@ -97,6 +87,11 @@ function cardEl(c) {
     el.className = 'card';
     el.dataset.uid = c.uid;
     el.title = describe(c);
+    // The card is its own control now that the strip of buttons is gone: it
+    // takes the focus, so what a mouse reaches by right-clicking a key
+    // reaches by pressing enter.
+    el.tabIndex = 0;
+    el.role = 'button';
     const img = document.createElement('img');
     img.src = c.image;
     img.alt = c.name;
@@ -104,25 +99,18 @@ function cardEl(c) {
     img.loading = 'lazy';
     const layer = document.createElement('div');
     layer.className = 'counters';
-    const actions = document.createElement('figcaption');
-    actions.className = 'actions';
-    el.append(img, layer, actions);
+    el.append(img, layer);
     cardEls.set(c.uid, el);
   }
   renderCounters(el.querySelector('.counters'), c.counters ?? []);
   el.classList.toggle('tapped', c.tapped);
   el.classList.toggle('permanent', G.isPermanent(c));
   el.classList.toggle('commander', Boolean(c.commander));
+  // The zone is on the element because the menu and the click handler both
+  // ask the card where it is; the label says it out loud for the same reason.
   if (el.dataset.zone !== c.zone) {
     el.dataset.zone = c.zone;
-    el.querySelector(':scope > .actions').replaceChildren(...ACTIONS[c.zone].map(([act, a, b]) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.dataset.act = act;
-      if (act === 'move') { btn.dataset.zone = a; btn.textContent = b; btn.title = ZONE_TITLE[a]; }
-      else { btn.textContent = a; btn.title = ACTION_TITLE[act]; }
-      return btn;
-    }));
+    el.setAttribute('aria-label', `${c.name}, ${c.zone}`);
   }
   return el;
 }
@@ -179,6 +167,10 @@ function renderOpponents() {
 function render() {
   renderOpponents();
 
+  // Moving an element blurs it, and every card that is drawn is moved; the
+  // keyboard would lose the card it was on at each commit.
+  const hadFocus = document.activeElement?.closest('.card');
+
   const seen = new Set();
   for (const c of game.cards) {
     seen.add(c.uid);
@@ -190,6 +182,7 @@ function render() {
   for (const [uid, el] of cardEls) {
     if (!seen.has(uid)) { el.remove(); cardEls.delete(uid); }
   }
+  if (hadFocus?.isConnected && document.activeElement === document.body) hadFocus.focus({ preventScroll: true });
 
   for (const el of document.querySelectorAll('[data-count]')) {
     const [side, zone] = el.dataset.count.split(':');
@@ -357,6 +350,9 @@ const enabledItems = () => [...menu.querySelectorAll('[role="menuitem"]:not(:dis
 
 // items: { label, title?, disabled?, run() }, or '-' for a separator.
 function openMenu(opener, items, at) {
+  // Asking the same opener again puts its menu away, rather than closing and
+  // opening it behind the click that was meant to dismiss it.
+  if (opener === menuOpener) { closeMenu(); return; }
   closeMenu();
   menuOpener = opener;
   menu.replaceChildren(...items.map((it) => {
@@ -392,8 +388,9 @@ function closeMenu() {
   menu.replaceChildren();
   if (opener.hasAttribute('aria-expanded')) opener.setAttribute('aria-expanded', 'false');
   // The focus goes back where the menu came from, unless whatever closed
-  // the menu has already put it somewhere of its own.
-  if (held || document.activeElement === document.body) opener.focus();
+  // the menu has already put it somewhere of its own. Without preventScroll
+  // a card far down the page would drag the viewport to it.
+  if (held || document.activeElement === document.body) opener.focus({ preventScroll: true });
 }
 
 // At the pointer, or under the opener; flipped to the other side of it when
@@ -441,7 +438,62 @@ document.addEventListener('click', (e) => {
 window.addEventListener('scroll', () => closeMenu(), true);
 window.addEventListener('resize', () => closeMenu());
 
-// --- the table --------------------------------------------------------
+// --- the card menu ----------------------------------------------------
+
+// Every zone but the card's own, in the order they sit on the table. The
+// old hover strip left destinations out per zone, which a player could not
+// predict; the menu offers all of them.
+const MOVES = [
+  ['battlefield', 'to the battlefield'],
+  ['hand', 'to hand'],
+  ['graveyard', 'to the graveyard'],
+  ['exile', 'to exile'],
+  ['command', 'to the command zone'],
+];
+
+// What can be done with the card, read off the element: it knows its uid
+// and the zone it is in, which is all any of these need.
+function itemsFor(el) {
+  const uid = el.dataset.uid;
+  const zone = el.dataset.zone;
+  const items = [];
+  // play takes a card out of hand and works out where it lands, so it is
+  // only offered where G.play accepts it.
+  if (zone === 'hand') items.push({ label: 'play', title: 'to the battlefield, or the graveyard if it is a spell', run: () => commit(G.play(game, uid)) });
+  items.push({ label: 'copy', title: 'another of this card, beside it', run: () => commit(G.copyCard(game, uid)) });
+  // Nothing in hand is on the table yet, so nothing there can be counted.
+  if (zone !== 'hand') items.push({ label: 'add counter…', title: 'a +1/+1, or a kind of your own', run: () => openPicker(el) });
+  items.push('-');
+  for (const [z, label] of MOVES) if (z !== zone) items.push({ label, run: () => commit(G.moveTo(game, uid, z)) });
+  items.push('-', { label: 'remove', title: 'the card was never there (a mistake)', run: () => commit(G.remove(game, uid)) });
+  return items;
+}
+
+const table = document.querySelector('.table');
+
+// A right-click anywhere on the card — its image, its counters — is the
+// card's own menu, dropped at the pointer. The picker keeps the browser's
+// menu, so its text can still be cut and pasted.
+table.addEventListener('contextmenu', (e) => {
+  if (e.target.closest('.ctr-pick')) return;
+  const card = e.target.closest('.card');
+  if (!card) return;
+  e.preventDefault();
+  openMenu(card, itemsFor(card), { x: e.clientX, y: e.clientY });
+});
+
+// Enter is the menu wherever the card is; space is the tap, which only a
+// permanent on the battlefield has, and the menu everywhere else. Keys
+// pressed inside the card — on a counter's + or − — are that button's.
+table.addEventListener('keydown', (e) => {
+  if (e.target !== e.target.closest('.card')) return;
+  const card = e.target;
+  const taps = card.dataset.zone === 'battlefield' && card.classList.contains('permanent');
+  if (e.key === ' ' && taps) commit(G.toggleTap(game, card.dataset.uid));
+  else if (e.key === 'Enter' || e.key === ' ' || e.key === 'ContextMenu') openMenu(card, itemsFor(card));
+  else return;
+  e.preventDefault(); // space scrolls the page, enter would not, but both are ours
+});
 
 // --- counters ---------------------------------------------------------
 
@@ -460,8 +512,7 @@ function openPicker(card) {
 }
 
 // Closed, the picker goes back where it lives, so no card is left holding
-// it: a card's children are its own, and its action strip is found by
-// class, not position.
+// it: a card's children are its own.
 function closePicker() {
   pick.hidden = true;
   delete pick.dataset.uid;
@@ -488,7 +539,7 @@ pickKind.addEventListener('blur', () => setTimeout(() => { if (!pick.contains(do
 // the card changes size or turns on its side, and never pokes out.
 let drag = null;
 
-document.querySelector('.table').addEventListener('pointerdown', (e) => {
+table.addEventListener('pointerdown', (e) => {
   const sq = e.target.closest('.counter');
   if (!sq || e.target.closest('button') || e.button !== 0) return;
   const layer = sq.parentElement;
@@ -497,7 +548,7 @@ document.querySelector('.table').addEventListener('pointerdown', (e) => {
   e.preventDefault();
 });
 
-document.querySelector('.table').addEventListener('pointermove', (e) => {
+table.addEventListener('pointermove', (e) => {
   if (!drag) return;
   const dx = e.clientX - drag.startX;
   const dy = e.clientY - drag.startY;
@@ -522,12 +573,12 @@ function endDrag() {
   render(); // the commit may be a no-op (same place); put the fractions back either way
 }
 
-document.querySelector('.table').addEventListener('pointerup', endDrag);
-document.querySelector('.table').addEventListener('pointercancel', endDrag);
+table.addEventListener('pointerup', endDrag);
+table.addEventListener('pointercancel', endDrag);
 
 // --- the table --------------------------------------------------------
 
-document.querySelector('.table').addEventListener('click', (e) => {
+table.addEventListener('click', (e) => {
   if (e.target.closest('.ctr-pick')) return;
   const btn = e.target.closest('button');
   if (btn?.dataset.ctr) {
@@ -540,15 +591,10 @@ document.querySelector('.table').addEventListener('click', (e) => {
     commit(G.adjustLife(game, btn.dataset.life === 'me' ? 'me' : view.opp, Number(btn.dataset.by)));
     return;
   }
+  // Everything else a card can do is in its menu; a left click on one is
+  // the tap, and only on the battlefield.
   const card = e.target.closest('.card');
-  if (!card) return;
-  const uid = card.dataset.uid;
-  if (btn?.dataset.act === 'counter') openPicker(card);
-  else if (btn?.dataset.act === 'play') commit(G.play(game, uid));
-  else if (btn?.dataset.act === 'copy') commit(G.copyCard(game, uid));
-  else if (btn?.dataset.act === 'move') commit(G.moveTo(game, uid, btn.dataset.zone));
-  else if (btn?.dataset.act === 'remove') commit(G.remove(game, uid));
-  else if (e.target.tagName === 'IMG' && card.dataset.zone === 'battlefield') commit(G.toggleTap(game, uid));
+  if (card && e.target.tagName === 'IMG' && card.dataset.zone === 'battlefield') commit(G.toggleTap(game, card.dataset.uid));
 });
 
 // --- turns, log, new game ---------------------------------------------
@@ -590,11 +636,9 @@ const GAME_MENU = [
   },
 ];
 
-$('menu-game').addEventListener('click', (e) => {
-  // A second click on the button puts its own menu away again.
-  if (menuOpener === e.currentTarget) closeMenu();
-  else openMenu(e.currentTarget, GAME_MENU);
-});
+// A second click on the button puts its own menu away again: openMenu's own
+// doing, so every opener behaves the same way.
+$('menu-game').addEventListener('click', (e) => openMenu(e.currentTarget, GAME_MENU));
 
 $('new-cancel').addEventListener('click', () => dialog.close());
 

@@ -68,8 +68,24 @@ try {
   // key, and chosen from by the item's label.
   const clickAt = async (sel) => { const p = JSON.parse(await evalJs(`(()=>{const r=document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2})})()`)); await mouse('mousePressed', p.x, p.y); await mouse('mouseReleased', p.x, p.y, 0); await sleep(80); };
   const menuUi = () => evalJs(`({hidden: document.getElementById('menu').hidden, expanded: document.getElementById('menu-game').getAttribute('aria-expanded'), items: [...document.querySelectorAll('#menu [role="menuitem"]')].map(b=>({label:b.textContent, title:b.title})), focus: document.activeElement.id, roles: [...document.getElementById('menu').children].map(c=>c.getAttribute('role'))})`);
-  const menuPick = async (label) => { const r = await evalJs(`(()=>{const b=[...document.querySelectorAll('#menu [role="menuitem"]')].find(b=>b.textContent===${JSON.stringify(label)});if(!b)return 'missing';b.click();return 'ok'})()`); await sleep(120); return r; };
-  const fromGameMenu = async (label) => { await clickAt('#menu-game'); return menuPick(label); };
+  const pickItem = async (label) => { const r = await evalJs(`(()=>{const b=[...document.querySelectorAll('#menu [role="menuitem"]')].find(b=>b.textContent===${JSON.stringify(label)});if(!b)return 'missing';b.click();return 'ok'})()`); await sleep(120); return r; };
+  const fromGameMenu = async (label) => { await clickAt('#menu-game'); return pickItem(label); };
+  // A card's own menu: a real right-click on the card — scrolled into view
+  // first, since these are viewport coordinates — then the item by its label.
+  const rightClick = async (x, y) => { for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: 'right', buttons: 2, clickCount: 1 }); await sleep(80); };
+  const rightClickAt = async (sel) => {
+    // Scrolled and settled before the rect is read: the scroll event that
+    // follows would otherwise arrive after the click and close the menu.
+    if (!(await evalJs(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});if(!e)return false;e.scrollIntoView({block:'center'});return true})()`))) return null;
+    await sleep(150);
+    const p = JSON.parse(await evalJs(`(()=>{const r=document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect();return JSON.stringify({x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)})})()`));
+    await rightClick(p.x, p.y);
+    return p;
+  };
+  const menuPick = async (sel, label) => ((await rightClickAt(sel)) ? pickItem(label) : 'missing');
+  const menuItems = () => evalJs(`[...document.getElementById('menu').children].map(c=>c.tagName==='HR'?'-':c.textContent).join('|')`);
+  const menuRect = () => evalJs(`document.getElementById('menu').getBoundingClientRect().toJSON()`);
+  const cardRect = (sel) => evalJs(`document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect().toJSON()`);
   const oppUi = () => evalJs(`({name: document.getElementById('opp-name').textContent, life: document.getElementById('life-opp').textContent, addLabel: document.getElementById('add-opp').textContent, tabsHidden: document.getElementById('opp-tabs').hidden, tabs: [...document.querySelectorAll('#opp-tabs button')].map(b=>({text:b.textContent, selected:b.getAttribute('aria-selected')==='true', active:b.classList.contains('active')}))})`);
 
   let u = await ui();
@@ -112,7 +128,20 @@ try {
   await type('llanowar elves'); await key('Enter', 'Enter', 13); await sleep(300);
   hand = await zone('me', 'hand');
   check('a second card joins my hand', hand.length === 2 && hand[1].name === 'Llanowar Elves', JSON.stringify(hand));
-  await click(`.card[data-uid="${hand[1].uid}"] button[data-act="play"]`); await sleep(100);
+  const elvesSel = `.card[data-uid="${hand[1].uid}"]`;
+  let at = await rightClickAt(elvesSel);
+  let items = await menuItems();
+  check('right-clicking a card in hand offers play, copy and every zone but hand, and no counters', items === 'play|copy|-|to the battlefield|to the graveyard|to exile|to the command zone|-|remove', items);
+  let mr = await menuRect();
+  check('the menu opens at the pointer, inside the viewport', Math.abs(mr.left - at.x) <= 1 && (Math.abs(mr.top - at.y) <= 1 || Math.abs(mr.bottom - at.y) <= 1) && mr.right <= (await evalJs('innerWidth')) - 8 && mr.bottom <= (await evalJs('innerHeight')) - 8, JSON.stringify({ at, mr }));
+  check('the card it belongs to says its name and where it is', (await el(elvesSel, "e.getAttribute('aria-label')")) === 'Llanowar Elves, hand' && (await el(elvesSel, "e.getAttribute('role')")) === 'button' && (await el(elvesSel, 'e.tabIndex')) === 0);
+  await key('Escape', 'Escape', 27); await sleep(80);
+  check('escape closes the card menu without doing anything, and the card has the focus', (await el('#menu', 'e.hidden')) && (await zone('me', 'hand')).length === 2 && (await evalJs(`document.activeElement.dataset.uid`)) === hand[1].uid);
+  await rightClickAt(`.card[data-uid="${hand[0].uid}"]`);
+  check('right-clicking another card moves the menu to it', !(await el('#menu', 'e.hidden')) && (await menuItems()).startsWith('play|copy'));
+  await rightClickAt(`.card[data-uid="${hand[0].uid}"]`);
+  check('right-clicking the card whose menu is up puts it away', await el('#menu', 'e.hidden'));
+  await menuPick(elvesSel, 'play'); await sleep(50);
   let field = await zone('me', 'battlefield');
   check('play moves the creature to my battlefield, untapped', field.length === 1 && field[0].name === 'Llanowar Elves' && !field[0].tapped && (await zone('me', 'hand')).length === 1, JSON.stringify(field));
   await click(`.card[data-uid="${hand[1].uid}"] img`); await sleep(100); field = await zone('me', 'battlefield');
@@ -126,10 +155,11 @@ try {
   check('clicking a card in hand does not tap it', !(await zone('me', 'hand'))[0].tapped);
 
   // my instant, cast
-  await click(`.card[data-uid="${hand[0].uid}"] button[data-act="play"]`); await sleep(100);
+  await menuPick(`.card[data-uid="${hand[0].uid}"]`, 'play'); await sleep(50);
   check('playing an instant from hand casts it to my graveyard', (await zone('me', 'graveyard')).length === 1 && (await zone('me', 'hand')).length === 0 && /I cast Lightning Bolt/.test((await ui()).log[0]));
 
   // the opponent
+  await evalJs(`document.getElementById('q').focus()`);
   await type('delver of secrets'); await key('Enter', 'Enter', 13, 8); await sleep(300); // shift+enter
   let theirs = await zone('opp', 'battlefield');
   check('shift+enter: the opponent plays it, straight onto their battlefield', theirs.length === 1 && theirs[0].name === 'Delver of Secrets // Insectile Aberration' && /opponent plays Delver/.test((await ui()).log[0]), JSON.stringify(theirs));
@@ -152,11 +182,15 @@ try {
   check('life buttons: opponent 20 -> 14, me 21, logged with the result', u.opp === '14' && u.me === '21' && /I gain 1 life \(21\)/.test(u.log[0]) && /opponent loses 1 life \(14\)/.test(u.log[1]), JSON.stringify({ opp: u.opp, me: u.me, log: u.log.slice(0, 2) }));
 
   // moves and remove
-  await click(`.card[data-uid="${hand[1].uid}"] button[data-act="move"][data-zone="exile"]`); await sleep(50);
-  check('a battlefield card can be exiled from its hover strip', (await zone('me', 'exile')).length === 1 && (await zone('me', 'battlefield')).length === 0);
-  await click(`.card[data-uid="${hand[1].uid}"] button[data-act="move"][data-zone="battlefield"]`); await sleep(50);
+  await rightClickAt(elvesSel);
+  items = await menuItems();
+  check('a card on the battlefield offers counters and every other zone, and no play', items === 'copy|add counter…|-|to hand|to the graveyard|to exile|to the command zone|-|remove', items);
+  check('remove and copy say what they do', (await evalJs(`[...document.querySelectorAll('#menu [role="menuitem"]')].map(b=>b.title).join('|')`)).includes('never there (a mistake)'));
+  await pickItem('to exile'); await sleep(50);
+  check('a battlefield card can be exiled from its menu', (await zone('me', 'exile')).length === 1 && (await zone('me', 'battlefield')).length === 0);
+  await menuPick(elvesSel, 'to the battlefield'); await sleep(50);
   check('and brought back to the battlefield from exile', (await zone('me', 'battlefield')).length === 1);
-  await click(`.card[data-uid="${hand[0].uid}"] button[data-act="remove"]`); await sleep(50);
+  await menuPick(`.card[data-uid="${hand[0].uid}"]`, 'remove'); await sleep(50);
   check('remove deletes a card outright', (await zone('me', 'graveyard')).length === 0 && /I remove Lightning Bolt/.test((await ui()).log[0]));
   const pileCard = await evalJs(`(()=>{const i=document.querySelector('.pile .card img');const r=i.getBoundingClientRect();const z=i.closest('.zone').getBoundingClientRect();return {w:Math.round(r.width),h:Math.round(r.height),ratio:Math.round(r.width/r.height*1000)/1000,zoneH:Math.round(z.height)}})()`);
   check('a card in a pile is small and keeps its proportions; the pile is only as tall as it needs', pileCard.w < 70 && Math.abs(pileCard.ratio - 488 / 680) < 0.01 && pileCard.zoneH < pileCard.h + 20, JSON.stringify(pileCard));
@@ -164,29 +198,29 @@ try {
   check('a card on the battlefield is full size with the same proportions', fieldCard.w > 100 && Math.abs(fieldCard.ratio - 488 / 680) < 0.01, JSON.stringify(fieldCard));
 
   // the command zone
-  await click(`.card[data-uid="${hand[1].uid}"] button[data-act="move"][data-zone="command"]`); await sleep(50);
+  await menuPick(elvesSel, 'to the command zone'); await sleep(50);
   check('a card can be sent to my command zone, where it wears the commander mark', (await zone('me', 'command')).length === 1 && (await el(`.card[data-uid="${hand[1].uid}"]`, "e.classList.contains('commander')")) && /my Llanowar Elves to command zone/.test((await ui()).log[0]));
-  await click(`.card[data-uid="${hand[1].uid}"] button[data-act="move"][data-zone="battlefield"]`); await sleep(50);
+  await menuPick(elvesSel, 'to the battlefield'); await sleep(50);
   check('cast from the command zone, it keeps the mark on the battlefield', (await zone('me', 'battlefield')).length === 1 && (await el(`.card[data-uid="${hand[1].uid}"]`, "e.classList.contains('commander')")));
-  await click(`.card[data-uid="${hand[1].uid}"] button[data-act="move"][data-zone="command"]`); await sleep(50);
+  await menuPick(elvesSel, 'to the command zone'); await sleep(50);
   check('and can go back', (await zone('me', 'command')).length === 1);
-  await click(`.card[data-uid="${hand[1].uid}"] button[data-act="move"][data-zone="battlefield"]`); await sleep(50);
+  await menuPick(elvesSel, 'to the battlefield'); await sleep(50);
   await shot('2-table');
 
   // copies
   await click(`.card[data-uid="${hand[1].uid}"] img`); await sleep(50); // tap the original first
-  await click(`.card[data-uid="${hand[1].uid}"] button[data-act="copy"]`); await sleep(100);
+  await menuPick(elvesSel, 'copy'); await sleep(50);
   field = await zone('me', 'battlefield');
   check('copy puts a second, untapped Llanowar Elves right after the tapped original', field.length === 2 && field.every((c) => c.name === 'Llanowar Elves') && field[0].uid === hand[1].uid && field[0].tapped && !field[1].tapped && /I copy Llanowar Elves/.test((await ui()).log[0]), JSON.stringify(field));
   const copyUid = field[1].uid;
   check('the copy has no commander mark, though the original does', (await el(`.card[data-uid="${copyUid}"]`, "e.classList.contains('commander')")) === false && (await el(`.card[data-uid="${hand[1].uid}"]`, "e.classList.contains('commander')")) === true);
   await click(`.card[data-uid="${copyUid}"] img`); await sleep(50);
   check('the copy taps on its own', (await zone('me', 'battlefield'))[1].tapped && (await zone('me', 'battlefield'))[0].tapped);
-  await click(`.card[data-uid="${theirs[0].uid}"] button[data-act="copy"]`); await sleep(100);
+  await menuPick(`.card[data-uid="${theirs[0].uid}"]`, 'copy'); await sleep(50);
   check('the opponent\'s card copies too, logged as theirs', (await zone('opp', 'battlefield')).length === 2 && /opponent copies Delver/.test((await ui()).log[0]));
   await shot('9-copies');
-  await click(`.card[data-uid="${copyUid}"] button[data-act="remove"]`); await sleep(50);
-  await click(`.card[data-uid="${(await zone('opp', 'battlefield'))[1].uid}"] button[data-act="remove"]`); await sleep(50);
+  await menuPick(`.card[data-uid="${copyUid}"]`, 'remove'); await sleep(50);
+  await menuPick(`.card[data-uid="${(await zone('opp', 'battlefield'))[1].uid}"]`, 'remove'); await sleep(50);
   await click(`.card[data-uid="${hand[1].uid}"] img`); await sleep(50); // untap the original again
   check('(copies removed, original untapped, for the checks that follow)', (await zone('me', 'battlefield')).length === 1 && (await zone('opp', 'battlefield')).length === 1 && !(await zone('me', 'battlefield'))[0].tapped);
 
@@ -194,11 +228,12 @@ try {
   await evalJs(`document.getElementById('q').focus()`);
   await type('forest'); await key('Enter', 'Enter', 13); await sleep(300);
   const forestUid = (await zone('me', 'hand'))[0].uid;
-  await click(`.card[data-uid="${forestUid}"] button[data-act="play"]`); await sleep(100);
+  await menuPick(`.card[data-uid="${forestUid}"]`, 'play'); await sleep(50);
   field = await zone('me', 'battlefield');
   check('a land played to my battlefield goes to the lands row; the creature is in the other', field.find((c) => c.name === 'Forest')?.tier === 'lands' && field.find((c) => c.name === 'Llanowar Elves')?.tier === 'spells', JSON.stringify(field));
   const rows = JSON.parse(await evalJs(`(()=>{const r=(sel)=>document.querySelector(sel).getBoundingClientRect();const me={lands:r('.zone[data-owner="me"] .tier[data-tier="lands"]'),spells:r('.zone[data-owner="me"] .tier[data-tier="spells"]')};const op={lands:r('.zone[data-owner="opp"] .tier[data-tier="lands"]'),spells:r('.zone[data-owner="opp"] .tier[data-tier="spells"]')};return JSON.stringify({meLandsBelow:me.lands.top>me.spells.bottom-1,oppLandsAbove:op.lands.bottom<=op.spells.top+1,emptyRowThin:op.lands.height<40,labels:[...document.querySelectorAll('.tier')].map(t=>getComputedStyle(t,'::before').content)})})()`));
   check('my lands row is below my other permanents; the opponent\'s is above theirs; an empty row is a thin labelled strip', rows.meLandsBelow && rows.oppLandsAbove && rows.emptyRowThin && rows.labels.every((l) => /lands|spells/.test(l)), JSON.stringify(rows));
+  await evalJs(`document.getElementById('q').focus()`);
   await type('forest'); await key('Enter', 'Enter', 13, 8); await sleep(300);
   check('the opponent\'s land goes to their lands row', (await zone('opp', 'battlefield')).find((c) => c.name === 'Forest')?.tier === 'lands');
   const tierFit = JSON.parse(await evalJs(`(()=>{const out=[];for(const t of document.querySelectorAll('.tier')){const z=t.closest('.zone').getBoundingClientRect();const r=t.getBoundingClientRect();const cs=getComputedStyle(t,'::before');const lw=parseFloat(cs.width)||0;const label={left:r.right-parseFloat(cs.right)-lw,right:r.right-parseFloat(cs.right),top:r.top+parseFloat(cs.top),bottom:r.top+parseFloat(cs.top)+(parseFloat(cs.height)||12)};const covered=[...t.querySelectorAll('.card')].some(c=>{const b=c.getBoundingClientRect();return b.left<label.right&&b.right>label.left&&b.top<label.bottom&&b.bottom>label.top});out.push({tier:t.dataset.tier,spansZone:z.width-r.width<20,labelCovered:covered,cards:t.querySelectorAll('.card').length})}return JSON.stringify(out)})()`));
@@ -206,23 +241,22 @@ try {
   await click(`.card[data-uid="${forestUid}"] img`); await sleep(100);
   check('a land taps like any permanent', (await zone('me', 'battlefield')).find((c) => c.name === 'Forest').tapped);
   await shot('8-lands');
-  await click(`.card[data-uid="${forestUid}"] button[data-act="remove"]`); await sleep(50);
-  await click(`.card[data-uid="${(await zone('opp', 'battlefield')).find((c) => c.name === 'Forest').uid}"] button[data-act="remove"]`); await sleep(50);
+  await menuPick(`.card[data-uid="${forestUid}"]`, 'remove'); await sleep(50);
+  await menuPick(`.card[data-uid="${(await zone('opp', 'battlefield')).find((c) => c.name === 'Forest').uid}"]`, 'remove'); await sleep(50);
   check('(both lands removed for the checks that follow)', (await zone('me', 'battlefield')).length === 1 && (await zone('opp', 'battlefield')).length === 1);
 
   // counters
-  const elvesSel = `.card[data-uid="${hand[1].uid}"]`;
   const squares = () => evalJs(`[...document.querySelectorAll('${elvesSel} .counter')].map(s=>({n:s.querySelector('.n').textContent,k:s.querySelector('.k').textContent,cid:s.dataset.cid,left:parseFloat(s.style.getPropertyValue('--x')),top:parseFloat(s.style.getPropertyValue('--y'))}))`);
   const counterState = async () => (await state()).cards.find((c) => c.uid === hand[1].uid).counters;
-  await click(`${elvesSel} button[data-act="counter"]`); await sleep(80);
-  check('ctr opens a picker on the card, prefilled +1/+1 and focused', !(await el('#ctr-pick', 'e.hidden')) && (await el('#ctr-pick', "e.closest('.card')?.dataset.uid")) === hand[1].uid && (await el('#ctr-kind', 'e.value')) === '+1/+1' && (await evalJs('document.activeElement.id')) === 'ctr-kind');
+  await menuPick(elvesSel, 'add counter…'); await sleep(50);
+  check('add counter… opens a picker on the card, prefilled +1/+1 and focused', !(await el('#ctr-pick', 'e.hidden')) && (await el('#ctr-pick', "e.closest('.card')?.dataset.uid")) === hand[1].uid && (await el('#ctr-kind', 'e.value')) === '+1/+1' && (await evalJs('document.activeElement.id')) === 'ctr-kind');
   await key('Enter', 'Enter', 13); await sleep(80);
   let sq = await squares();
   check('closed, the picker is not left inside the card', (await el('#ctr-pick', "e.closest('.card')")) === null && (await el('#ctr-pick', "e.parentElement.id")) === 'journal');
   check('enter adds a +1/+1 counter: one square, showing 1 and its kind; picker closes; logged', sq.length === 1 && sq[0].n === '1' && sq[0].k === '+1/+1' && (await el('#ctr-pick', 'e.hidden')) && /I put a \+1\/\+1 counter on Llanowar Elves \(1\)/.test((await ui()).log[0]), JSON.stringify(sq));
-  await click(`${elvesSel} button[data-act="counter"]`); await sleep(50); await key('Enter', 'Enter', 13); await sleep(80); sq = await squares();
+  await menuPick(elvesSel, 'add counter…'); await key('Enter', 'Enter', 13); await sleep(80); sq = await squares();
   check('a second +1/+1 stacks onto the same square: 2', sq.length === 1 && sq[0].n === '2', JSON.stringify(sq));
-  await click(`${elvesSel} button[data-act="counter"]`); await sleep(50);
+  await menuPick(elvesSel, 'add counter…');
   await evalJs(`document.getElementById('ctr-kind').value=''`); await type('lore'); await key('Enter', 'Enter', 13); await sleep(80); sq = await squares();
   check('a custom kind is its own square, below the first', sq.length === 2 && sq[1].k === 'lore' && sq[1].n === '1' && sq[1].top > sq[0].top && /I put a lore counter on/.test((await ui()).log[0]), JSON.stringify(sq));
   const sqBox = await evalJs(`(()=>{const s=document.querySelector('${elvesSel} .counter');const r=s.getBoundingClientRect();const c=document.querySelector('${elvesSel}').getBoundingClientRect();const st=getComputedStyle(s);return {w:r.width,h:r.height,inside:r.left>=c.left&&r.right<=c.right&&r.top>=c.top&&r.bottom<=c.bottom,alpha:parseFloat((st.backgroundColor.match(/[\\d.]+\\)$/)||['1'])[0])}})()`);
@@ -268,16 +302,44 @@ try {
   await click(`${elvesSel} img`); await sleep(200);
 
   // leaving the zone clears them; undo restores them
-  await click(`${elvesSel} button[data-act="move"][data-zone="graveyard"]`); await sleep(50);
+  await menuPick(elvesSel, 'to the graveyard'); await sleep(50);
   check('sent to the graveyard, the card loses its counters', (await counterState()).length === 0 && (await squares()).length === 0);
   await click('#undo'); await sleep(50);
   check('undo brings the card and its lore counter back', (await zone('me', 'battlefield')).length === 1 && (await squares()).length === 1 && (await squares())[0].k === 'lore');
   await click(`${elvesSel} .counter button[data-ctr="-1"]`); await sleep(50);
   check('(cleared for the checks that follow)', (await squares()).length === 0);
 
+  check('no card carries the old hover strip any more', (await evalJs(`document.querySelectorAll('.card .actions, .card button[data-act]').length`)) === 0);
+  await rightClickAt(elvesSel);
+  items = await menuItems();
+  check('the menu of a card that has been round the zones is still built from where it is now', items === 'copy|add counter…|-|to hand|to the graveyard|to exile|to the command zone|-|remove', items);
+  await key('Escape', 'Escape', 27); await sleep(50);
+
+  // the keyboard, now that the strip that carried it is gone
+  await evalJs(`document.querySelector('${elvesSel}').focus()`);
+  check('a card takes the focus', (await evalJs(`document.activeElement.dataset.uid`)) === hand[1].uid);
+  await key('Enter', 'Enter', 13); await sleep(80);
+  const under = await menuRect(); const onCard = await cardRect(elvesSel);
+  check('enter opens the card\'s menu under it, with the focus on the first item', !(await el('#menu', 'e.hidden')) && under.top >= onCard.bottom - 1 && Math.abs(under.left - onCard.left) < 1 && (await evalJs(`document.activeElement.getAttribute('role')`)) === 'menuitem', JSON.stringify({ under, onCard }));
+  await key('Escape', 'Escape', 27); await sleep(50);
+  await key('ContextMenu', 'ContextMenu', 93); await sleep(80);
+  check('the menu key opens it as well', !(await el('#menu', 'e.hidden')) && (await menuItems()).startsWith('copy|add counter…'));
+  await key('Escape', 'Escape', 27); await sleep(50);
+  await key(' ', 'Space', 32); await sleep(80);
+  check('space taps the permanent it is on rather than opening the menu', (await zone('me', 'battlefield'))[0].tapped && (await el('#menu', 'e.hidden')));
+  await key(' ', 'Space', 32); await sleep(80);
+  check('and untaps it again', !(await zone('me', 'battlefield'))[0].tapped);
+  await menuPick(elvesSel, 'to the graveyard'); await sleep(50);
+  await evalJs(`document.querySelector('${elvesSel}').focus()`);
+  await key(' ', 'Space', 32); await sleep(80);
+  check('off the battlefield, where nothing taps, space opens the menu instead', !(await el('#menu', 'e.hidden')) && (await menuItems()).startsWith('copy|add counter…'));
+  await key('Escape', 'Escape', 27); await sleep(50);
+  await menuPick(elvesSel, 'to the battlefield'); await sleep(50);
+  check('(the card is back on the battlefield for the checks that follow)', (await zone('me', 'battlefield')).length === 1);
+
   // the opponent's creature, after my card has been through the picker and a zone change
   const delverSel = `.card[data-uid="${theirs[0].uid}"]`;
-  await click(`${delverSel} button[data-act="counter"]`); await sleep(80);
+  await menuPick(delverSel, 'add counter…'); await sleep(50);
   check('the picker opens on the opponent\'s card with its input intact and focused', (await el('#ctr-pick', "e.closest('.card')?.dataset.uid")) === theirs[0].uid && (await evalJs(`document.querySelector('#ctr-pick input')!==null`)) && (await evalJs('document.activeElement.id')) === 'ctr-kind' && (await el('#ctr-kind', 'e.value')) === '+1/+1');
   await evalJs(`document.getElementById('ctr-kind').value=''`); await type('lore'); await key('Enter', 'Enter', 13); await sleep(100);
   const oppSquares = await evalJs(`[...document.querySelectorAll('${delverSel} .counter')].map(s=>({n:s.querySelector('.n').textContent,k:s.querySelector('.k').textContent}))`);
@@ -286,7 +348,6 @@ try {
   check('+ on their square works too', (await evalJs(`document.querySelector('${delverSel} .counter .n').textContent`)) === '2');
   await click(`${delverSel} .counter button[data-ctr="-1"]`); await click(`${delverSel} .counter button[data-ctr="-1"]`); await sleep(50);
   check('(their square cleared)', (await evalJs(`document.querySelectorAll('${delverSel} .counter').length`)) === 0);
-  check('the action strip of a card that changed zone is still its own: exile shows field/hand/grave/cmd', (await evalJs(`[...document.querySelectorAll('.card[data-uid="${hand[1].uid}"] .actions button')].map(b=>b.textContent).join(' ')`)) === 'ctr copy grave exile hand cmd ×');
 
   // undo, persistence, unknown card
   const before = JSON.stringify(await state());
@@ -375,6 +436,18 @@ try {
   check('and undo does: the cards, the turn, and the life are back', JSON.stringify(await state()) === JSON.stringify(beforeReset) && u.turn === 'turn 5 · my turn' && (await state()).cards.length === 2, JSON.stringify({ turn: u.turn }));
   await click('#opp-tabs button[data-opp="opp3"]'); await sleep(50);
   check('the view is not part of undo: it stays on opponent 1, and opponent 3\'s card is still there when you look', (await zone('opp', 'battlefield')).length === 1);
+
+  // a menu at the edge of a small window: it flips rather than hanging off
+  await send('Emulation.setDeviceMetricsOverride', { width: 420, height: 340, deviceScaleFactor: 1, mobile: false });
+  await sleep(200);
+  const corner = JSON.parse(await evalJs(`(()=>{const c=[...document.querySelectorAll('.card')].map(e=>e.getBoundingClientRect()).sort((a,b)=>(b.right+b.bottom)-(a.right+a.bottom))[0];return JSON.stringify({x:Math.min(Math.round(c.right)-3,innerWidth-3),y:Math.min(Math.round(c.bottom)-3,innerHeight-3)})})()`));
+  await rightClick(corner.x, corner.y);
+  const edge = await menuRect();
+  const vp = JSON.parse(await evalJs(`JSON.stringify({w:innerWidth,h:innerHeight})`));
+  check('right-clicked at the far corner of a small window, the menu flips and stays inside it', edge.left >= 8 && edge.top >= 8 && edge.right <= vp.w - 8 && edge.bottom <= vp.h - 8 && (edge.top < corner.y || edge.left < corner.x), JSON.stringify({ corner, edge, vp }));
+  await shot('a-menu-at-the-edge');
+  await key('Escape', 'Escape', 27); await sleep(50);
+  await send('Emulation.clearDeviceMetricsOverride'); await sleep(200);
 
   // a save from before there were several opponents
   const old = { turn: 3, active: 'opp', life: { me: 18, opp: 12 }, cards: [{ ...parseFixture('elves'), uid: '1', owner: 'opp', zone: 'battlefield', tapped: true }], log: [{ turn: 1, text: 'new game' }], nextUid: 2 };

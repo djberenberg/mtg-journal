@@ -134,13 +134,19 @@ try {
   check('right-clicking a card in hand offers play, copy and every zone but hand, and no counters', items === 'play|copy|-|to the battlefield|to the graveyard|to exile|to the command zone|-|remove', items);
   let mr = await menuRect();
   check('the menu opens at the pointer, inside the viewport', Math.abs(mr.left - at.x) <= 1 && (Math.abs(mr.top - at.y) <= 1 || Math.abs(mr.bottom - at.y) <= 1) && mr.right <= (await evalJs('innerWidth')) - 8 && mr.bottom <= (await evalJs('innerHeight')) - 8, JSON.stringify({ at, mr }));
-  check('the card it belongs to says its name and where it is', (await el(elvesSel, "e.getAttribute('aria-label')")) === 'Llanowar Elves, hand' && (await el(elvesSel, "e.getAttribute('role')")) === 'button' && (await el(elvesSel, 'e.tabIndex')) === 0);
+  check('the card it belongs to says its name and where it is', (await el(elvesSel, "e.getAttribute('aria-label')")) === 'Llanowar Elves, hand' && (await el(elvesSel, "e.getAttribute('role')")) === 'group' && (await el(elvesSel, 'e.tabIndex')) === 0);
   await key('Escape', 'Escape', 27); await sleep(80);
   check('escape closes the card menu without doing anything, and the card has the focus', (await el('#menu', 'e.hidden')) && (await zone('me', 'hand')).length === 2 && (await evalJs(`document.activeElement.dataset.uid`)) === hand[1].uid);
   await rightClickAt(`.card[data-uid="${hand[0].uid}"]`);
   check('right-clicking another card moves the menu to it', !(await el('#menu', 'e.hidden')) && (await menuItems()).startsWith('play|copy'));
-  await rightClickAt(`.card[data-uid="${hand[0].uid}"]`);
-  check('right-clicking the card whose menu is up puts it away', await el('#menu', 'e.hidden'));
+  const moved0 = await menuRect();
+  const again = JSON.parse(await evalJs(`(()=>{const r=document.querySelector('.card[data-uid="${hand[0].uid}"]').getBoundingClientRect();return JSON.stringify({x:Math.round(r.left+r.width/2)+20,y:Math.round(r.top+r.height/2)+20})})()`));
+  await rightClick(again.x, again.y);
+  const moved1 = await menuRect();
+  check('right-clicking the same card again moves its menu to the new pointer rather than closing it', !(await el('#menu', 'e.hidden')) && (Math.abs(moved1.left - again.x) <= 1 || Math.abs(moved1.right - again.x) <= 1) && (Math.abs(moved1.top - again.y) <= 1 || Math.abs(moved1.bottom - again.y) <= 1) && (moved1.left !== moved0.left || moved1.top !== moved0.top), JSON.stringify({ again, moved0, moved1 }));
+  // Away again: it is over the cards below it, and a right-click on the
+  // menu itself is the menu's, not theirs.
+  await key('Escape', 'Escape', 27); await sleep(50);
   await menuPick(elvesSel, 'play'); await sleep(50);
   let field = await zone('me', 'battlefield');
   check('play moves the creature to my battlefield, untapped', field.length === 1 && field[0].name === 'Llanowar Elves' && !field[0].tapped && (await zone('me', 'hand')).length === 1, JSON.stringify(field));

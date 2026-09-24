@@ -89,9 +89,11 @@ function cardEl(c) {
     el.title = describe(c);
     // The card is its own control now that the strip of buttons is gone: it
     // takes the focus, so what a mouse reaches by right-clicking a key
-    // reaches by pressing enter.
+    // reaches by pressing enter. Not a button, though it acts like one: a
+    // button's children are presentational, which would take the working +
+    // and − on its counters away from a screen reader.
     el.tabIndex = 0;
-    el.role = 'button';
+    el.role = 'group';
     const img = document.createElement('img');
     img.src = c.image;
     img.alt = c.name;
@@ -351,8 +353,9 @@ const enabledItems = () => [...menu.querySelectorAll('[role="menuitem"]:not(:dis
 // items: { label, title?, disabled?, run() }, or '-' for a separator.
 function openMenu(opener, items, at) {
   // Asking the same opener again puts its menu away, rather than closing and
-  // opening it behind the click that was meant to dismiss it.
-  if (opener === menuOpener) { closeMenu(); return; }
+  // opening it behind the click that was meant to dismiss it — but a menu
+  // asked for at a pointer moves to the new one, as a context menu does.
+  if (opener === menuOpener && !at) { closeMenu(); return; }
   closeMenu();
   menuOpener = opener;
   menu.replaceChildren(...items.map((it) => {

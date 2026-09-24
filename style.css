@@ -236,6 +236,12 @@ h3 { font-size: 0.68rem; }
 .menu-btn:hover:not(:disabled) { color: var(--fg); background: transparent; }
 .menu-btn[aria-expanded="true"] { color: var(--fg); background: var(--raised); }
 
+/* The chevron that says a button drops a menu, as the log's toggle says
+   which way it goes. It points down whether the menu is up or not: the
+   button is not a disclosure, and the navbar is the only menu on the page
+   a player is expected to find without right-clicking something. */
+.menu-btn::after { content: " ▾"; color: var(--muted); }
+
 .turnbar {
   display: flex;
   flex-wrap: wrap;

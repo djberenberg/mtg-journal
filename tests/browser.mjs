@@ -920,6 +920,9 @@ try {
   let m = await menuUi();
   check('the game button opens a menu of new game and reset game, each with what it does', !m.hidden && m.expanded === 'true' && m.items.map((i) => i.label).join('|') === 'new game|reset game' && /opponents and life/.test(m.items[0].title) && /same opponents and life/.test(m.items[1].title) && m.roles.every((r) => r === 'menuitem'), JSON.stringify(m));
   check('the navbar has one button, game, and no card button exists', (await evalJs(`[...document.querySelectorAll('#navbar button')].map(b=>b.id).join('|')`)) === 'menu-game' && (await evalJs(`document.getElementById('menu-card') === null`)));
+  // The only menu on the page a player is meant to find without right-clicking
+  // something, so the button wears the chevron that says so.
+  check('the game button carries a chevron saying it opens a menu', (await evalJs(`getComputedStyle(document.getElementById('menu-game'), '::after').content`)).includes('▾'), await evalJs(`getComputedStyle(document.getElementById('menu-game'), '::after').content`));
   const menuBox = JSON.parse(await evalJs(`(()=>{const m=document.getElementById('menu').getBoundingClientRect();const b=document.getElementById('menu-game').getBoundingClientRect();return JSON.stringify({fixed:getComputedStyle(document.getElementById('menu')).position,under:m.top>=b.bottom-1&&Math.abs(m.left-b.left)<1,inView:m.left>=8&&m.top>=8&&m.right<=innerWidth-8&&m.bottom<=innerHeight-8})})()`));
   check('the menu hangs under the button, fixed and inside the viewport', menuBox.fixed === 'fixed' && menuBox.under && menuBox.inView, JSON.stringify(menuBox));
   check('opened with the mouse, the focus waits on the menu, not on an item', m.focus === 'menu');

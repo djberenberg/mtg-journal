@@ -425,6 +425,14 @@ try {
   check('the opponent\'s land goes to their lands row', (await zone('opp', 'battlefield')).find((c) => c.name === 'Forest')?.tier === 'lands');
   const tierFit = JSON.parse(await evalJs(`(()=>{const out=[];for(const t of document.querySelectorAll('.tier')){const z=t.closest('.zone').getBoundingClientRect();const r=t.getBoundingClientRect();const cs=getComputedStyle(t,'::before');const lw=parseFloat(cs.width)||0;const label={left:r.right-parseFloat(cs.right)-lw,right:r.right-parseFloat(cs.right),top:r.top+parseFloat(cs.top),bottom:r.top+parseFloat(cs.top)+(parseFloat(cs.height)||12)};const covered=[...t.querySelectorAll('.card')].some(c=>{const b=c.getBoundingClientRect();return b.left<label.right&&b.right>label.left&&b.top<label.bottom&&b.bottom>label.top});out.push({tier:t.dataset.tier,spansZone:z.width-r.width<20,labelCovered:covered,cards:t.querySelectorAll('.card').length})}return JSON.stringify(out)})()`));
   check('each row spans the whole battlefield, and no card sits over its label', tierFit.every((t) => t.spansZone && !t.labelCovered), JSON.stringify(tierFit));
+  // A land is the card with rows missing: no mana cost, no power and
+  // toughness. The panel leaves those out rather than showing them empty.
+  await hover(`.card[data-uid="${forestUid}"]`);
+  const landPeek = await peekUi(`.card[data-uid="${forestUid}"]`);
+  const landCost = await evalJs(`document.querySelectorAll('#peek .cost').length`);
+  check('a card with no cost and no stats gets those rows left out: name, type, and text only', !landPeek.hidden && landPeek.rows.join('|') === 'peek-name|peek-type|peek-text' && landCost === 0 && landPeek.text === 'ForestBasic Land — Forest({T}: Add {G}.)', JSON.stringify({ rows: landPeek.rows, cost: landCost, text: landPeek.text }));
+  await unhover();
+
   await click(`.card[data-uid="${forestUid}"] img`); await sleep(100);
   check('a land taps like any permanent', (await zone('me', 'battlefield')).find((c) => c.name === 'Forest').tapped);
   await shot('8-lands');
@@ -636,6 +644,15 @@ try {
   await clickAt(elvesSel); await sleep(80); // the drag ate the click; this one taps
   await clickAt(elvesSel); await sleep(80);
   check('(the creature is untapped again)', !(await zone('me', 'battlefield')).find((c) => c.uid === hand[1].uid).tapped);
+
+  // An attached equipment is still a permanent of its own, and the strip of
+  // it that shows is all a click has to land on to turn it sideways.
+  const tapOf = async (uid) => (await zone('me', 'battlefield')).find((c) => c.uid === uid)?.tapped;
+  const clickStrip = async () => { const p = await showing(bonesSel); await mouse('mousePressed', p.x, p.y); await mouse('mouseReleased', p.x, p.y, 0); await sleep(120); };
+  await clickStrip();
+  check('a tucked equipment still taps, by the edge of it that shows, and its host does not turn with it', (await tapOf(bonesUid)) === true && (await tapOf(hand[1].uid)) === false && /I tap Bonesplitter/.test((await ui()).log[0]), JSON.stringify({ bones: await tapOf(bonesUid), host: await tapOf(hand[1].uid), log: (await ui()).log[0] }));
+  await clickStrip();
+  check('and untaps the same way, still tucked in behind its host', (await tapOf(bonesUid)) === false && (await tucked(bonesUid)).attached && (await attachedTo(bonesUid)) === hand[1].uid, JSON.stringify(await tucked(bonesUid)));
 
   // The picker is painted inside the card it is on, and a tucked card is
   // behind its host: it has to come out in front while the box is up, or it

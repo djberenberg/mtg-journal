@@ -556,7 +556,7 @@ test('twenty-one is lethal, and said once: on the crossing', () => {
   let g = adjustCommanderDamage(g0, 'opp1', uid, 20);
   assert.equal(g.log.filter((l) => /dead to/.test(l.text)).length, 0);
   g = adjustCommanderDamage(g, 'opp1', uid, 1);
-  assert.equal(last(g).text, "opponent is dead to Llanowar Elves's commander damage (21)");
+  assert.equal(last(g).text, 'opponent is dead to commander damage from Llanowar Elves (21)');
   assert.equal(g.log.at(-2).text, "opponent's 1 from Llanowar Elves (21), -1 life");
   g = adjustCommanderDamage(g, 'opp1', uid, 1);
   assert.equal(g.log.filter((l) => /dead to/.test(l.text)).length, 1, '21 to 22 is not news');
@@ -567,7 +567,7 @@ test('the lethal line is in the first person when it is me', () => {
   const uid = only(g, 'opp1', 'command').uid;
   g = adjustCommanderDamage(g, 'me', uid, 21);
   assert.equal(g.log.at(-2).text, 'my 21 from Llanowar Elves (21), -1 life');
-  assert.equal(last(g).text, "I am dead to Llanowar Elves's commander damage (21)");
+  assert.equal(last(g).text, 'I am dead to commander damage from Llanowar Elves (21)');
 });
 
 test('with several opponents the line names the one who took it', () => {
@@ -575,6 +575,19 @@ test('with several opponents the line names the one who took it', () => {
   const g = adjustCommanderDamage(g0, 'opp2', uid, 4);
   assert.equal(last(g).text, "opponent 2's 4 from Llanowar Elves (4), 16 life");
   assert.deepEqual(Object.keys(g.cmdDamage), ['opp2']);
+});
+
+test('partners keep a tally each: neither counts toward the other\'s twenty-one', () => {
+  let g = addCard(addCard(newGame(), ELVES, 'me', 'command'), FOREST, 'me', 'command');
+  const [one, two] = cardsIn(g, 'me', 'command').map((c) => c.uid);
+  g = adjustCommanderDamage(g, 'opp1', one, 20);
+  g = adjustCommanderDamage(g, 'opp1', two, 20);
+  assert.deepEqual(g.cmdDamage.opp1, { [one]: 20, [two]: 20 });
+  assert.equal(g.life.opp1, -20, 'forty life gone between them');
+  assert.equal(g.log.filter((l) => /dead to/.test(l.text)).length, 0, 'forty is not twenty-one from one of them');
+  g = adjustCommanderDamage(g, 'opp1', two, 1);
+  assert.equal(g.cmdDamage.opp1[one], 20, 'the other tally is left alone');
+  assert.equal(last(g).text, 'opponent is dead to commander damage from Forest (21)');
 });
 
 test('a commander deals no commander damage to its own controller, and nothing else does any', () => {
@@ -617,4 +630,7 @@ test('a save from before commander damage opens without it, not rejected', () =>
   assert.deepEqual(load(JSON.stringify(g)), g, 'and one with it comes back as it was');
   const { cmdDamage, ...old } = g;
   assert.deepEqual(load(JSON.stringify(old)), { ...old, cmdDamage: {} });
+  for (const junk of [[], 'x', 3, null]) {
+    assert.deepEqual(load(JSON.stringify({ ...old, cmdDamage: junk })), { ...old, cmdDamage: {} }, JSON.stringify(junk));
+  }
 });

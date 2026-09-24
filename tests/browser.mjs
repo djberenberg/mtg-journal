@@ -556,7 +556,7 @@ try {
   check('undo brings back the counter just removed', (await evalJs(`document.querySelectorAll('${delverSel} .counter').length`)) === 1 && (await evalJs(`document.querySelector('${delverSel} .counter .k').textContent`)) === 'lore');
   await click(`${delverSel} .counter button[data-ctr="-1"]`); await sleep(50);
   check('(redone by hand; state matches)', JSON.stringify(await state()) === before);
-  const cardCount = (await state()).cards.length;
+  let cardCount = (await state()).cards.length;
   await send('Page.navigate', { url: `${BASE}/` }); await sleep(800); u = await ui();
   check('a reload keeps the game: same cards, turn, life, log', (await state()).cards.length === cardCount && u.turn === 'turn 3 · my turn' && u.opp === '14' && (await zone('opp', 'battlefield')).length === 1 && u.log.length > 10, JSON.stringify({ turn: u.turn, cards: cardCount }));
   check('but not the undo stack', u.undo);
@@ -588,7 +588,7 @@ try {
   await tickBtn('opp', cmdUid, 1); await sleep(80);
   check('the ticker keeps its buttons across the commit, so the keyboard does not lose its place', (await evalJs(`document.activeElement.getAttribute('aria-label')`)) === 'One more from Llanowar Elves');
   await tickMany('opp', cmdUid, 1, 16); await sleep(120); tk = await tickers('opp'); u = await ui();
-  check('at 21 the ticker turns lethal and the log says so, once', tk[0].n === '21' && tk[0].lethal && /opponent is dead to Llanowar Elves's commander damage \(21\)/.test(u.log[0]) && u.log.filter((l) => /dead to/.test(l)).length === 1, JSON.stringify({ n: tk[0].n, lethal: tk[0].lethal, log: u.log.slice(0, 2) }));
+  check('at 21 the ticker turns lethal and the log says so, once', tk[0].n === '21' && tk[0].lethal && /opponent is dead to commander damage from Llanowar Elves \(21\)/.test(u.log[0]) && u.log.filter((l) => /dead to/.test(l)).length === 1, JSON.stringify({ n: tk[0].n, lethal: tk[0].lethal, log: u.log.slice(0, 2) }));
   await shot('d-commander-damage');
   await tickBtn('opp', cmdUid, 1); await sleep(80); tk = await tickers('opp'); u = await ui();
   check('and 21 to 22 does not say it again', tk[0].n === '22' && tk[0].lethal && u.log.filter((l) => /dead to/.test(l)).length === 1, JSON.stringify({ n: tk[0].n, log: u.log[0] }));
@@ -604,8 +604,7 @@ try {
   check('removing a commander takes its ticker with it, the life it took standing', (await tickers('me')).length === 0 && (await evalJs(`Number(document.getElementById('life-me').textContent)`)) === myLife, JSON.stringify(await tickers('me')));
   await click('#undo'); await sleep(80);
   check('undo brings the card and its ticker back', (await tickers('me')).length === 1 && (await tickers('me'))[0].n === '3');
-  // and off the table again, so what follows counts the cards it expects
-  await menuPick(`.card[data-uid="${(await tickers('me'))[0].uid}"]`, 'remove'); await sleep(80);
+  cardCount = (await state()).cards.length; // a commander joined the table here; what follows counts from now
 
   // the navbar's game menu
   await clickAt('#menu-game');

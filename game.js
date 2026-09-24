@@ -249,7 +249,10 @@ export function adjustCommanderDamage(state, recipient, commanderUid, delta) {
   );
   // Only on the crossing: 21 to 22 is not news.
   if (now >= 21 && was < 21) {
-    out = say(out, `${label(state, recipient)} ${recipient === 'me' ? 'am' : 'is'} dead to ${c.name}'s commander damage (21)`);
+    // "dead to commander damage from X", never "X's commander damage":
+    // half the commanders in the game have a name ending in s or in an
+    // apostrophe, and a possessive on top of one reads badly.
+    out = say(out, `${label(state, recipient)} ${recipient === 'me' ? 'am' : 'is'} dead to commander damage from ${c.name} (21)`);
   }
   return out;
 }
@@ -332,6 +335,6 @@ export function load(json) {
   if (!seats.includes(s.active) || !s.life || seats.some((p) => typeof s.life[p] !== 'number')) return null;
   if (typeof s.startingLife !== 'number') s = { ...s, startingLife: 20 };
   // A save from before commander damage was kept simply has none of it.
-  if (!s.cmdDamage || typeof s.cmdDamage !== 'object') s = { ...s, cmdDamage: {} };
+  if (!s.cmdDamage || typeof s.cmdDamage !== 'object' || Array.isArray(s.cmdDamage)) s = { ...s, cmdDamage: {} };
   return s;
 }

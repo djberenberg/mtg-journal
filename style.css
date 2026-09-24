@@ -239,6 +239,46 @@ h3 { font-size: 0.68rem; }
 #log-toggle::after { content: " ▸"; color: var(--muted); }
 #log-toggle[aria-expanded="true"]::after { content: " ▾"; }
 
+/* The staged card, on a line of its own under the search box and no wider
+   than it, rather than stretched across the bar. Outlined in the accent,
+   because it is the thing the card menu is about to act on. */
+.staged {
+  flex-basis: 100%;
+  max-width: 24rem; /* the search field's own basis */
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.4rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: 1px solid var(--accent);
+}
+
+.staged[hidden] { display: none; }
+
+/* The ratio is given rather than left to the image, so the row is its full
+   height before the picture arrives and does not jump when it does. */
+.staged img {
+  display: block;
+  width: 2.6rem;
+  aspect-ratio: 488 / 680;
+  border-radius: 4.5% / 3.2%;
+  background: var(--raised);
+}
+
+.staged-name { font-weight: 600; margin-right: auto; }
+
+.staged button {
+  padding: 0 0.4rem;
+  font-size: 1rem;
+  line-height: 1.4;
+  color: var(--muted);
+  background: transparent;
+}
+
+.staged button:hover { color: var(--fg); background: var(--raised); }
+
 .status {
   flex-basis: 100%;
   margin: 0;

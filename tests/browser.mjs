@@ -49,6 +49,12 @@ try {
   const evalJs = async (expression) => (await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })).result.result.value;
   const key = async (k, code, vk, mods = 0) => { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: k, code, windowsVirtualKeyCode: vk, modifiers: mods, text: type === 'keyDown' ? (k === 'Enter' ? '\r' : k.length === 1 ? k : undefined) : undefined }); };
   const type = async (s) => { for (const ch of s) await send('Input.insertText', { text: ch }); };
+  // The search stages the card it finds; where it goes is chosen after. So
+  // every card that reaches the table here takes two presses, not one.
+  const stage = async (name) => { await evalJs(`document.getElementById('q').focus()`); await type(name); await key('Enter', 'Enter', 13); await sleep(300); };
+  const toHand = async (name) => { await stage(name); await key('Enter', 'Enter', 13); await sleep(150); };
+  const oppPlays = async (name) => { await stage(name); await key('Enter', 'Enter', 13, 8); await sleep(150); };
+  const stagedUi = () => evalJs(`({hidden: document.getElementById('staged').hidden, name: document.getElementById('staged-name').textContent, img: document.getElementById('staged-img').getAttribute('src'), disabled: document.getElementById('menu-card').disabled})`);
   const mouse = (type, x, y, buttons = 1) => send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons, clickCount: 1 });
   const click = (sel) => evalJs(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});if(!e)return 'missing';e.click();return 'ok'})()`);
   const shot = async (name) => writeFileSync(join(out, `${name}.png`), Buffer.from((await send('Page.captureScreenshot')).result.data, 'base64'));
@@ -67,7 +73,7 @@ try {
   // The menus: opened with a real press, so the page can tell a mouse from a
   // key, and chosen from by the item's label.
   const clickAt = async (sel) => { const p = JSON.parse(await evalJs(`(()=>{const r=document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2})})()`)); await mouse('mousePressed', p.x, p.y); await mouse('mouseReleased', p.x, p.y, 0); await sleep(80); };
-  const menuUi = () => evalJs(`({hidden: document.getElementById('menu').hidden, expanded: document.getElementById('menu-game').getAttribute('aria-expanded'), items: [...document.querySelectorAll('#menu [role="menuitem"]')].map(b=>({label:b.textContent, title:b.title})), focus: document.activeElement.id, roles: [...document.getElementById('menu').children].map(c=>c.getAttribute('role'))})`);
+  const menuUi = (opener = 'menu-game') => evalJs(`({hidden: document.getElementById('menu').hidden, expanded: document.getElementById(${JSON.stringify(opener)}).getAttribute('aria-expanded'), items: [...document.querySelectorAll('#menu [role="menuitem"]')].map(b=>({label:b.textContent, title:b.title})), focus: document.activeElement.id, roles: [...document.getElementById('menu').children].map(c=>c.getAttribute('role'))})`);
   const pickItem = async (label) => { const r = await evalJs(`(()=>{const b=[...document.querySelectorAll('#menu [role="menuitem"]')].find(b=>b.textContent===${JSON.stringify(label)});if(!b)return 'missing';b.click();return 'ok'})()`); await sleep(120); return r; };
   const fromGameMenu = async (label) => { await clickAt('#menu-game'); return pickItem(label); };
   // A card's own menu: a real right-click on the card — scrolled into view
@@ -99,13 +105,16 @@ try {
   const menuItems = () => evalJs(`[...document.getElementById('menu').children].map(c=>c.tagName==='HR'?'-':c.textContent).join('|')`);
   const menuRect = () => evalJs(`document.getElementById('menu').getBoundingClientRect().toJSON()`);
   const cardRect = (sel) => evalJs(`document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect().toJSON()`);
-  const oppUi = () => evalJs(`({name: document.getElementById('opp-name').textContent, life: document.getElementById('life-opp').textContent, addLabel: document.getElementById('add-opp').textContent, tabsHidden: document.getElementById('opp-tabs').hidden, tabs: [...document.querySelectorAll('#opp-tabs button')].map(b=>({text:b.textContent, selected:b.getAttribute('aria-selected')==='true', active:b.classList.contains('active')}))})`);
+  const oppUi = () => evalJs(`({name: document.getElementById('opp-name').textContent, life: document.getElementById('life-opp').textContent, tabsHidden: document.getElementById('opp-tabs').hidden, tabs: [...document.querySelectorAll('#opp-tabs button')].map(b=>({text:b.textContent, selected:b.getAttribute('aria-selected')==='true', active:b.classList.contains('active')}))})`);
 
   let u = await ui();
+  let st = await stagedUi();
   check('a fresh page: turn 1, my turn, 20/20, one log line, undo disabled, search focused', u.turn === 'turn 1 · my turn' && u.me === '20' && u.opp === '20' && u.log.length === 1 && /1 opponent, 20 life/.test(u.log[0]) && u.undo && await evalJs(`document.activeElement.id`) === 'q', JSON.stringify(u));
   check('dark theme: the page background is dark and the text light', await evalJs(`(()=>{const b=getComputedStyle(document.body);const lum=(c)=>{const [r,g,bl]=c.match(/\\d+/g).map(Number);return (r+g+bl)/3};return lum(b.backgroundColor)<40&&lum(b.color)>200&&getComputedStyle(document.documentElement).colorScheme==='dark'})()`));
   let o = await oppUi();
-  check('one opponent: no tabs, plain "opponent", button reads "opponent plays"', o.tabsHidden && o.name === 'opponent' && o.addLabel === 'opponent plays', JSON.stringify(o));
+  check('one opponent: no tabs and a plain "opponent"; the search form has no add buttons left', o.tabsHidden && o.name === 'opponent' && (await evalJs(`document.querySelectorAll('#search button').length`)) === 0, JSON.stringify(o));
+  st = await stagedUi();
+  check('nothing is staged to begin with: the slot is away and the card button is disabled', st.hidden && st.disabled, JSON.stringify(st));
   check('the opponent\'s hand pile is hidden while empty', await evalJs(`document.querySelector('[data-pile="opp:hand"]').hidden`));
   check('both sides have a command zone', (await evalJs(`document.querySelectorAll('.zone[data-zone="command"]').length`)) === 2);
 
@@ -133,12 +142,16 @@ try {
   await key('Enter', 'Enter', 13); await sleep(50); u = await ui();
   check('enter takes the suggestion into the box and closes the list, adding nothing yet', u.q === 'Lightning Bolt' && u.suggestHidden && (await state()).cards.length === 0, JSON.stringify({ q: u.q, hidden: u.suggestHidden }));
   await key('Enter', 'Enter', 13); await sleep(300); u = await ui();
+  st = await stagedUi();
+  check('enter again looks it up and stages it: the slot shows its name and picture, the box clears, and the card button wakes up', !st.hidden && st.name === 'Lightning Bolt' && /^https:\/\/cards\.scryfall\.io\//.test(st.img) && !st.disabled && u.q === '' && /Lightning Bolt — choose from card/.test(u.status) && !u.error, JSON.stringify({ st, status: u.status }));
+  check('staging puts nothing on the table and nothing in the log', (await state()).cards.length === 0 && u.log.length === 1 && u.undo);
+  await key('Enter', 'Enter', 13); await sleep(150); u = await ui(); st = await stagedUi();
   let hand = await zone('me', 'hand');
-  check('enter again looks it up and puts it in my hand; the box clears; the log says so', hand.length === 1 && hand[0].name === 'Lightning Bolt' && u.q === '' && /I draw Lightning Bolt/.test(u.log[0]) && /Lightning Bolt/.test(u.status) && !u.error, JSON.stringify({ hand, status: u.status, log: u.log[0] }));
+  check('a second enter sends it to my hand and empties the slot; the log says so', hand.length === 1 && hand[0].name === 'Lightning Bolt' && st.hidden && st.disabled && /I draw Lightning Bolt/.test(u.log[0]) && /I draw Lightning Bolt/.test(u.status) && !u.error, JSON.stringify({ hand, status: u.status, log: u.log[0] }));
   check('undo is enabled now', !u.undo);
 
   // a creature to my hand, played, tapped
-  await type('llanowar elves'); await key('Enter', 'Enter', 13); await sleep(300);
+  await toHand('llanowar elves');
   hand = await zone('me', 'hand');
   check('a second card joins my hand', hand.length === 2 && hand[1].name === 'Llanowar Elves', JSON.stringify(hand));
   const elvesSel = `.card[data-uid="${hand[1].uid}"]`;
@@ -180,8 +193,11 @@ try {
   // the opponent
   await evalJs(`document.getElementById('q').focus()`);
   await type('delver of secrets'); await key('Enter', 'Enter', 13, 8); await sleep(300); // shift+enter
+  st = await stagedUi();
+  check('shift+enter with text in the box stages it, just as enter does', !st.hidden && st.name.startsWith('Delver of Secrets') && (await zone('opp', 'battlefield')).length === 0, JSON.stringify(st));
+  await key('Enter', 'Enter', 13, 8); await sleep(150);
   let theirs = await zone('opp', 'battlefield');
-  check('shift+enter: the opponent plays it, straight onto their battlefield', theirs.length === 1 && theirs[0].name === 'Delver of Secrets // Insectile Aberration' && /opponent plays Delver/.test((await ui()).log[0]), JSON.stringify(theirs));
+  check('shift+enter on a staged card: the opponent plays it, straight onto their battlefield', theirs.length === 1 && theirs[0].name === 'Delver of Secrets // Insectile Aberration' && /opponent plays Delver/.test((await ui()).log[0]), JSON.stringify(theirs));
   check('a double-faced card shows its front face', await evalJs(`document.querySelector('.zone[data-owner="opp"][data-zone="battlefield"] img').src.includes('/front/')`));
   // hovering: the panel of card text, and the card itself a little bigger
   const delverOnField = '.zone[data-owner="opp"][data-zone="battlefield"] .card';
@@ -193,8 +209,8 @@ try {
   await shot('b-hover');
   await unhover();
   check('moving off the card puts the panel away', (await peekUi(delverOnField)).hidden);
-  await type('lightning bolt'); await click('#add-opp'); await sleep(300);
-  check('the opponent-plays button sends their instant to their graveyard', (await zone('opp', 'graveyard')).length === 1 && (await zone('opp', 'battlefield')).length === 1 && (await evalJs(`document.querySelector('[data-count="opp:graveyard"]').textContent`)) === '1');
+  await oppPlays('lightning bolt');
+  check('shift+enter sends their instant to their graveyard', (await zone('opp', 'graveyard')).length === 1 && (await zone('opp', 'battlefield')).length === 1 && (await evalJs(`document.querySelector('[data-count="opp:graveyard"]').textContent`)) === '1');
   await click(`.card[data-uid="${theirs[0].uid}"] img`); await sleep(100);
   check('the opponent\'s creature taps on click too', (await zone('opp', 'battlefield'))[0].tapped);
 
@@ -236,6 +252,29 @@ try {
   await menuPick(elvesSel, 'to the battlefield'); await sleep(50);
   await shot('2-table');
 
+  // the card menu: where a staged card can go
+  const onTable = (await state()).cards.length;
+  await stage('bolt');
+  st = await stagedUi();
+  check('a staged card waits in its slot with nothing added to the table, and the card button is enabled', !st.hidden && st.name === 'Lightning Bolt' && !st.disabled && (await zone('me', 'hand')).length === 0 && (await state()).cards.length === onTable, JSON.stringify(st));
+  await shot('c-staged');
+  await clickAt('#menu-card');
+  let cm = await menuUi('menu-card');
+  check('the card button opens my hand, the opponent playing it, and both command zones', !cm.hidden && cm.expanded === 'true' && cm.items.map((i) => i.label).join('|') === "send to my hand|opponent plays|send to my command zone|send to opponent's command zone", JSON.stringify(cm));
+  await pickItem('send to my command zone');
+  let cmd = await zone('me', 'command');
+  st = await stagedUi();
+  check('send to my command zone puts it there wearing the commander mark, and empties the slot', cmd.length === 1 && cmd[0].name === 'Lightning Bolt' && (await el(`.card[data-uid="${cmd[0].uid}"]`, "e.classList.contains('commander')")) && st.hidden && st.disabled && /I put Lightning Bolt in command zone/.test((await ui()).log[0]), JSON.stringify({ cmd, st }));
+  await menuPick(`.card[data-uid="${cmd[0].uid}"]`, 'remove'); await sleep(50);
+  // discarded rather than placed
+  await stage('bolt');
+  await click('#staged-clear'); await sleep(80); st = await stagedUi();
+  check('the × discards the staged card: nothing reaches the table and the card button is disabled again', st.hidden && st.disabled && (await zone('me', 'command')).length === 0 && (await state()).cards.length === onTable && /discarded Lightning Bolt/.test((await ui()).status), JSON.stringify(st));
+  await stage('bolt');
+  await key('Escape', 'Escape', 27); await sleep(80);
+  st = await stagedUi();
+  check('escape in the empty box discards it too', st.hidden && st.disabled && (await state()).cards.length === onTable, JSON.stringify(st));
+
   // copies
   await click(`.card[data-uid="${hand[1].uid}"] img`); await sleep(50); // tap the original first
   await menuPick(elvesSel, 'copy'); await sleep(50);
@@ -261,16 +300,14 @@ try {
   check('(copies removed, original untapped, for the checks that follow)', (await zone('me', 'battlefield')).length === 1 && (await zone('opp', 'battlefield')).length === 1 && !(await zone('me', 'battlefield'))[0].tapped);
 
   // lands have a row of their own
-  await evalJs(`document.getElementById('q').focus()`);
-  await type('forest'); await key('Enter', 'Enter', 13); await sleep(300);
+  await toHand('forest');
   const forestUid = (await zone('me', 'hand'))[0].uid;
   await menuPick(`.card[data-uid="${forestUid}"]`, 'play'); await sleep(50);
   field = await zone('me', 'battlefield');
   check('a land played to my battlefield goes to the lands row; the creature is in the other', field.find((c) => c.name === 'Forest')?.tier === 'lands' && field.find((c) => c.name === 'Llanowar Elves')?.tier === 'spells', JSON.stringify(field));
   const rows = JSON.parse(await evalJs(`(()=>{const r=(sel)=>document.querySelector(sel).getBoundingClientRect();const me={lands:r('.zone[data-owner="me"] .tier[data-tier="lands"]'),spells:r('.zone[data-owner="me"] .tier[data-tier="spells"]')};const op={lands:r('.zone[data-owner="opp"] .tier[data-tier="lands"]'),spells:r('.zone[data-owner="opp"] .tier[data-tier="spells"]')};return JSON.stringify({meLandsBelow:me.lands.top>me.spells.bottom-1,oppLandsAbove:op.lands.bottom<=op.spells.top+1,emptyRowThin:op.lands.height<40,labels:[...document.querySelectorAll('.tier')].map(t=>getComputedStyle(t,'::before').content)})})()`));
   check('my lands row is below my other permanents; the opponent\'s is above theirs; an empty row is a thin labelled strip', rows.meLandsBelow && rows.oppLandsAbove && rows.emptyRowThin && rows.labels.every((l) => /lands|spells/.test(l)), JSON.stringify(rows));
-  await evalJs(`document.getElementById('q').focus()`);
-  await type('forest'); await key('Enter', 'Enter', 13, 8); await sleep(300);
+  await oppPlays('forest');
   check('the opponent\'s land goes to their lands row', (await zone('opp', 'battlefield')).find((c) => c.name === 'Forest')?.tier === 'lands');
   const tierFit = JSON.parse(await evalJs(`(()=>{const out=[];for(const t of document.querySelectorAll('.tier')){const z=t.closest('.zone').getBoundingClientRect();const r=t.getBoundingClientRect();const cs=getComputedStyle(t,'::before');const lw=parseFloat(cs.width)||0;const label={left:r.right-parseFloat(cs.right)-lw,right:r.right-parseFloat(cs.right),top:r.top+parseFloat(cs.top),bottom:r.top+parseFloat(cs.top)+(parseFloat(cs.height)||12)};const covered=[...t.querySelectorAll('.card')].some(c=>{const b=c.getBoundingClientRect();return b.left<label.right&&b.right>label.left&&b.top<label.bottom&&b.bottom>label.top});out.push({tier:t.dataset.tier,spansZone:z.width-r.width<20,labelCovered:covered,cards:t.querySelectorAll('.card').length})}return JSON.stringify(out)})()`));
   check('each row spans the whole battlefield, and no card sits over its label', tierFit.every((t) => t.spansZone && !t.labelCovered), JSON.stringify(tierFit));
@@ -401,7 +438,8 @@ try {
   await evalJs(`document.getElementById('q').focus()`);
   await type('xyzzyplugh'); await key('Enter', 'Enter', 13); await sleep(300); u = await ui();
   check('an unknown name: Scryfall\'s message in the status line, nothing added', u.error && /No cards found/.test(u.status) && (await state()).cards.length === cardCount, u.status);
-  check('the box keeps the text for fixing', u.q === 'xyzzyplugh');
+  st = await stagedUi();
+  check('the box keeps the text for fixing, and nothing is staged', u.q === 'xyzzyplugh' && st.hidden && st.disabled, JSON.stringify(st));
   await evalJs(`document.getElementById('q').value=''`);
 
   // the navbar's game menu
@@ -437,14 +475,13 @@ try {
   await fromGameMenu('new game');
   await click('input[name="opponents"][value="3"]'); await click('input[name="life"][value="40"]');
   await evalJs(`document.getElementById('new-form').requestSubmit()`); await sleep(200); u = await ui(); o = await oppUi();
-  check('three opponents at 40: the table is cleared, everyone at 40, three tabs', (await state()).cards.length === 0 && u.turn === 'turn 1 · my turn' && u.me === '40' && u.opp === '40' && /3 opponents, 40 life/.test(u.log[0]) && !o.tabsHidden && o.tabs.length === 3 && o.tabs[0].selected && o.name === 'opponent 1' && o.addLabel === 'opponent 1 plays', JSON.stringify({ turn: u.turn, me: u.me, o }));
+  check('three opponents at 40: the table is cleared, everyone at 40, three tabs', (await state()).cards.length === 0 && u.turn === 'turn 1 · my turn' && u.me === '40' && u.opp === '40' && /3 opponents, 40 life/.test(u.log[0]) && !o.tabsHidden && o.tabs.length === 3 && o.tabs[0].selected && o.name === 'opponent 1', JSON.stringify({ turn: u.turn, me: u.me, o }));
   check('the dialog closed and the table has no card elements left', !(await el('#new-dialog', 'e.open')) && (await evalJs(`document.querySelectorAll('.card').length`)) === 0);
   await shot('3-three-opponents');
 
   await click('#opp-tabs button[data-opp="opp2"]'); await sleep(50); o = await oppUi();
-  check('the second tab brings up opponent 2\'s board', o.name === 'opponent 2' && o.addLabel === 'opponent 2 plays' && o.tabs[1].selected && !o.tabs[0].selected, JSON.stringify(o));
-  await evalJs(`document.getElementById('q').focus()`);
-  await type('llanowar elves'); await key('Enter', 'Enter', 13, 8); await sleep(300);
+  check('the second tab brings up opponent 2\'s board', o.name === 'opponent 2' && o.tabs[1].selected && !o.tabs[0].selected, JSON.stringify(o));
+  await oppPlays('llanowar elves');
   check('shift+enter plays it for opponent 2', (await zone('opp', 'battlefield')).length === 1 && /opponent 2 plays Llanowar Elves/.test((await ui()).log[0]));
   await click('[data-life="opp"][data-by="-5"]'); await sleep(50); o = await oppUi();
   check('the life buttons act on the opponent in view; every tab shows its owner\'s life', o.life === '35' && o.tabs[1].text === 'opponent 235' && o.tabs[0].text === 'opponent 140' && /opponent 2 loses 5 life \(35\)/.test((await ui()).log[0]), JSON.stringify(o.tabs));
@@ -452,10 +489,23 @@ try {
   check('back on opponent 1: an empty board and 40 life; opponent 2\'s card is kept, not shown', (await zone('opp', 'battlefield')).length === 0 && o.life === '40' && (await state()).cards.length === 1, JSON.stringify(o));
   await click('#opp-tabs button[data-opp="opp2"]'); await sleep(50);
   check('and it is there again on opponent 2', (await zone('opp', 'battlefield')).length === 1);
+  // the card menu names whoever's tab is up, and is rebuilt when it changes
+  await stage('bolt');
+  await clickAt('#menu-card');
+  cm = await menuUi('menu-card');
+  check('the card menu names the opponent in view', cm.items.map((i) => i.label).join('|') === "send to my hand|opponent 2 plays|send to my command zone|send to opponent 2's command zone", JSON.stringify(cm.items.map((i) => i.label)));
+  await key('Escape', 'Escape', 27); await sleep(50);
   await click('#opp-tabs button[data-opp="opp3"]'); await sleep(50);
-  await type('delver'); await key('Enter', 'Enter', 13, 8); await sleep(300);
+  await clickAt('#menu-card');
+  cm = await menuUi('menu-card');
+  check('and follows the tab: the same staged card now offers opponent 3', cm.items.map((i) => i.label).join('|') === "send to my hand|opponent 3 plays|send to my command zone|send to opponent 3's command zone", JSON.stringify(cm.items.map((i) => i.label)));
+  await pickItem("send to opponent 3's command zone");
+  cmd = await zone('opp', 'command');
+  check('their command zone item puts it in their command zone, as their commander', cmd.length === 1 && cmd[0].name === 'Lightning Bolt' && (await el(`.card[data-uid="${cmd[0].uid}"]`, "e.classList.contains('commander')")) && (await stagedUi()).hidden && /opponent 3 puts Lightning Bolt in command zone/.test((await ui()).log[0]), JSON.stringify(cmd));
+  await menuPick(`.card[data-uid="${cmd[0].uid}"]`, 'remove'); await sleep(50);
+  await oppPlays('delver');
   check('opponent 3 can have a board too', (await zone('opp', 'battlefield')).length === 1 && /opponent 3 plays Delver/.test((await ui()).log[0]));
-  await click(`.card[data-uid="2"] img`); await sleep(50);
+  await click(`.card[data-uid="${(await zone('opp', 'battlefield'))[0].uid}"] img`); await sleep(50);
   check('opponent 3\'s creature tapped', (await zone('opp', 'battlefield'))[0].tapped);
   await shot('4-opp3');
 

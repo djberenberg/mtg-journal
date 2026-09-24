@@ -168,7 +168,6 @@ function renderOpponents() {
   }));
   $('opp-name').textContent = G.label(game, view.opp);
   $('life-opp').textContent = game.life[view.opp];
-  $('add-opp').textContent = `${G.label(game, view.opp)} plays`;
 }
 
 function render() {
@@ -223,8 +222,14 @@ function render() {
 // --- adding cards -----------------------------------------------------
 
 let pending = null; // the lookup in flight, so a second enter does not double up
+// The card the search found, waiting for a destination. Not game state: it
+// is nowhere on the table yet, so it is neither saved nor undone, and one
+// card is staged at a time.
+let staged = null;
 
-async function add(owner) {
+// The search box finds the card; where it goes is chosen afterwards, from
+// the card menu or with a second enter.
+async function stage() {
   const name = q.value.trim();
   if (!name || pending) return;
   closeSuggestions();
@@ -232,9 +237,10 @@ async function add(owner) {
   pending = lookup(name);
   try {
     const card = await pending;
-    commit(G.addCard(game, card, owner));
+    staged = card;
     q.value = '';
-    setStatus(`${owner === 'me' ? 'to my hand' : `${G.label(game, owner)} plays`}: ${card.name}`);
+    renderStaged();
+    setStatus(`${card.name} — choose from card ▾`);
   } catch (e) {
     setStatus(e instanceof NotFound ? e.message : `Scryfall: ${e.message}`, true);
   } finally {
@@ -243,13 +249,51 @@ async function add(owner) {
   }
 }
 
+// dest is 'me:hand', 'opp:play', 'me:command' or 'opp:command'. addCard
+// works out where an opponent's play lands and that a card put in the
+// command zone is the commander, so only the owner and the zone are said
+// here.
+function place(dest) {
+  if (!staged) return;
+  const [side, where] = dest.split(':');
+  commit(G.addCard(game, staged, side === 'me' ? 'me' : view.opp, where === 'command' ? 'command' : undefined));
+  clearStaged();
+  // The log has just said what happened, in the game's own words; the
+  // status line need not say it differently.
+  setStatus(game.log.at(-1).text);
+  q.focus();
+}
+
+function discard() {
+  if (!staged) return;
+  const { name } = staged;
+  clearStaged();
+  setStatus(`discarded ${name}`);
+  q.focus();
+}
+
+function clearStaged() {
+  staged = null;
+  renderStaged();
+}
+
+// The slot, and the menu button that acts on it: there is nothing for the
+// menu to offer while the slot is empty.
+function renderStaged() {
+  $('staged').hidden = !staged;
+  $('menu-card').disabled = !staged;
+  if (!staged) return;
+  $('staged-img').src = staged.image;
+  $('staged-name').textContent = staged.name;
+}
+
 function setStatus(text, error = false) {
   status.textContent = text;
   status.classList.toggle('error', error);
 }
 
-$('search').addEventListener('submit', (e) => { e.preventDefault(); add('me'); });
-$('add-opp').addEventListener('click', () => add(view.opp));
+$('search').addEventListener('submit', (e) => { e.preventDefault(); stage(); });
+$('staged-clear').addEventListener('click', discard);
 
 // --- suggestions ------------------------------------------------------
 
@@ -305,7 +349,14 @@ q.addEventListener('input', () => {
 });
 
 q.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); add(view.opp); return; }
+  // With a card staged and nothing typed, the keys are its destination:
+  // enter to my hand, shift+enter the opponent playing it. So a card still
+  // takes two keystrokes, as it did when enter added one outright.
+  const waiting = staged && q.value.trim() === '';
+  if (e.key === 'Enter' && waiting) { e.preventDefault(); place(e.shiftKey ? 'opp:play' : 'me:hand'); return; }
+  if (e.key === 'Escape' && waiting) { discard(); return; }
+  // With something typed, either enter stages it; the destination comes after.
+  if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); stage(); return; }
   if (suggest.hidden) return;
   if (e.key === 'ArrowDown') { e.preventDefault(); select((selected + 1) % names.length); }
   else if (e.key === 'ArrowUp') { e.preventDefault(); select((selected - 1 + names.length) % names.length); }
@@ -737,6 +788,20 @@ const GAME_MENU = [
 // A second click on the button puts its own menu away again: openMenu's own
 // doing, so every opener behaves the same way.
 $('menu-game').addEventListener('click', (e) => openMenu(e.currentTarget, GAME_MENU));
+
+// Where the staged card can go. Built afresh on each open, so the opponent
+// it names is the one whose tab is up, not the one who was when the page
+// loaded.
+const cardMenu = () => [
+  { label: 'send to my hand', run: () => place('me:hand') },
+  { label: `${G.label(game, view.opp)} plays`, title: 'to their battlefield, or their graveyard if it is a spell', run: () => place('opp:play') },
+  { label: 'send to my command zone', title: 'as my commander', run: () => place('me:command') },
+  { label: `send to ${G.label(game, view.opp, 'possessive')} command zone`, title: 'as their commander', run: () => place('opp:command') },
+];
+
+// The button is disabled until the search stages something, so the menu is
+// only ever opened with a card to act on.
+$('menu-card').addEventListener('click', (e) => openMenu(e.currentTarget, cardMenu()));
 
 $('new-cancel').addEventListener('click', () => dialog.close());
 

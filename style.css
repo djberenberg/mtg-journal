@@ -169,6 +169,7 @@ h3 { font-size: 0.68rem; }
 /* The container is only focused so the arrow keys have somewhere to start;
    the item that has the focus is the one that shows it. */
 .menu:focus { outline: none; }
+.menu[hidden] { display: none; }
 
 .menu button {
   display: block;
@@ -200,6 +201,8 @@ h3 { font-size: 0.68rem; }
   border-radius: 8px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
 }
+
+.peek[hidden] { display: none; }
 
 .peek-name {
   display: flex;

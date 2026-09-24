@@ -479,7 +479,15 @@ function setStatus(text, error = false) {
   status.classList.toggle('error', error);
 }
 
-$('search').addEventListener('submit', (e) => { e.preventDefault(); stage(); });
+// Whatever the arrow keys have landed on is the card meant, whichever way
+// the lookup was asked for: without this, clicking the button would send the
+// half-typed text to the fuzzy lookup while enter would have taken the
+// suggestion.
+$('search').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (selected >= 0) { q.value = names[selected]; closeSuggestions(); }
+  stage();
+});
 $('staged-clear').addEventListener('click', discard);
 
 // --- suggestions ------------------------------------------------------
@@ -683,6 +691,16 @@ window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (drag?.
 // Any click outside closes it. The opener's own click is its toggle, which
 // is handled where the menu is opened; this runs after that.
 document.addEventListener('click', (e) => {
+  if (menuOpen() && !menu.contains(e.target) && !menuOpener.contains(e.target)) closeMenu();
+});
+
+// And any right-click outside, which sends no click at all: without this the
+// browser's own menu would come up over ours and the two would sit there
+// together. A right-click that opens a menu of its own runs first — the
+// handlers that do are on the table and on the slot, below this one in the
+// tree — so by the time this fires the new opener is the card under the
+// pointer, and its own menu is left alone.
+document.addEventListener('contextmenu', (e) => {
   if (menuOpen() && !menu.contains(e.target) && !menuOpener.contains(e.target)) closeMenu();
 });
 

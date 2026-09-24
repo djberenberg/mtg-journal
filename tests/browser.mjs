@@ -1,6 +1,8 @@
 // Drives the page in headless Chrome with Scryfall replaced by the saved
 // fixtures, so it runs offline and the same way every time. Not a node:test
-// file: run it directly with `node tests/browser.mjs`. Needs Google Chrome.
+// file: run it directly with `node tests/browser.mjs`. Needs Chrome: the
+// path below is where macOS keeps it, and anywhere else CHROME has to say.
+// A chrome-headless-shell binary does as well as the browser.
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -332,6 +334,13 @@ try {
   await type('bolt'); await click('#look-up'); await sleep(300);
   st = await stagedUi();
   check('clicking look up stages the typed card, as enter does: it waits in its slot with nothing added to the table', !st.hidden && st.name === 'Lightning Bolt' && (await zone('me', 'hand')).length === 0 && (await state()).cards.length === onTable, JSON.stringify(st));
+  // "lightn" is no card: only the highlighted suggestion makes this one.
+  await evalJs(`document.getElementById('q').focus()`);
+  await type('lightn'); await sleep(450);
+  for (let i = 0, n = (await ui()).suggestions.indexOf('Lightning Bolt'); i <= n; i++) await key('ArrowDown', 'ArrowDown', 40);
+  await click('#look-up'); await sleep(300);
+  st = await stagedUi(); u = await ui();
+  check('and takes whatever the arrow keys have landed on, so the button and enter look up the same card', !st.hidden && st.name === 'Lightning Bolt' && u.q === '' && !u.error, JSON.stringify({ st, status: u.status }));
   await shot('c-staged');
   at = await rightClickAt('#staged');
   items = await menuItems();
@@ -882,6 +891,10 @@ try {
   await clickAt('#menu-game');
   await evalJs(`document.body.click()`); await sleep(50);
   check('a click outside puts the menu away', (await el('#menu', 'e.hidden')) && (await el('#menu-game', "e.getAttribute('aria-expanded')")) === 'false');
+  await clickAt('#menu-game');
+  const upBeforeRight = !(await el('#menu', 'e.hidden'));
+  await rightClick(4, 400); // the page's own background, where no card is
+  check('a right-click outside puts it away too, rather than showing the browser its own menu on top', upBeforeRight && (await el('#menu', 'e.hidden')) && (await el('#menu-game', "e.getAttribute('aria-expanded')")) === 'false', `open first: ${upBeforeRight}`);
   await clickAt('#menu-game');
   await clickAt('#menu-game');
   check('a second click on the button closes its own menu rather than reopening it', await el('#menu', 'e.hidden'));

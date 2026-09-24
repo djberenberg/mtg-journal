@@ -354,6 +354,13 @@ test('resetGame starts over with the same seats and starting life', () => {
   assert.equal(r.nextUid, 1);
 });
 
+test('resetGame runs a bad starting life through the same guard newGame does', () => {
+  const g = { ...newGame(), startingLife: 'x' };
+  assert.equal(resetGame(g).startingLife, 20, 'not a number: the 20 fallback, not the raw value');
+  assert.deepEqual(resetGame(g).life, { me: 20, opp1: 20 });
+  assert.equal(resetGame({ ...newGame(), startingLife: 5000 }).startingLife, 999, 'clamped to the top');
+});
+
 // --- counters ------------------------------------------------------------
 
 const onField = () => { const g = addCard(newGame(), ELVES, 'opp1'); return [g, only(g, 'opp1', 'battlefield').uid]; };

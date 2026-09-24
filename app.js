@@ -128,16 +128,19 @@ function cardEl(c) {
   el.classList.toggle('permanent', G.isPermanent(c));
   el.classList.toggle('commander', Boolean(c.commander));
   // The zone is on the element because the menu and the click handler both
-  // ask the card where it is; the label says it out loud for the same reason.
+  // ask the card where it is.
   if (el.dataset.zone !== c.zone) {
     const from = el.dataset.zone;
     // Measured where the card still is: render() puts it in its new zone in
     // the same frame, and the box it lands in is not the one it is leaving.
     const rect = from && el.isConnected ? el.getBoundingClientRect() : null;
     el.dataset.zone = c.zone;
-    el.setAttribute('aria-label', `${c.name}, ${c.zone}`);
     if (rect?.width) zoneEffect(el, rect, from, c.zone, wasTurned);
   }
+  // Said out loud: which card, where it is, and what it is tucked in behind
+  // — a reader hears the attachment a pointer can see.
+  const host = c.attachedTo ? game.cards.find((x) => x.uid === c.attachedTo) : null;
+  el.setAttribute('aria-label', `${c.name}, ${c.zone}${host ? `, on ${host.name}` : ''}`);
   return el;
 }
 
@@ -305,6 +308,24 @@ function renderOpponents() {
   renderCmdDamage('opp', view.opp);
 }
 
+// The order the table draws in: the order of the state, except that an
+// equipment attached to a creature gives up its own place and follows its
+// host, so it can be tucked in behind it wherever the host has got to. A
+// creature with several keeps them in the order the state has them.
+function drawOrder(cards) {
+  const here = new Set(cards.map((c) => c.uid));
+  const worn = new Map();
+  for (const c of cards) {
+    if (c.attachedTo && here.has(c.attachedTo)) worn.set(c.attachedTo, [...(worn.get(c.attachedTo) ?? []), c]);
+  }
+  const out = [];
+  for (const c of cards) {
+    if (c.attachedTo && here.has(c.attachedTo)) continue; // drawn with its host instead
+    out.push(c, ...(worn.get(c.uid) ?? []));
+  }
+  return out;
+}
+
 function render() {
   renderOpponents();
 
@@ -330,12 +351,18 @@ function render() {
   // pointer would snap back, and an arrival would play again at every
   // commit. Only the cards that really changed place are touched.
   const next = new Map();
-  for (const c of game.cards) {
-    if (!shown.has(c.uid)) continue;
+  const hosts = new Set(game.cards.map((c) => c.attachedTo).filter(Boolean));
+  for (const c of drawOrder(game.cards.filter((x) => shown.has(x.uid)))) {
     const el = cardEl(c);
     const place = placeFor(c.owner === 'me' ? 'me' : 'opp', c);
     const i = next.get(place) ?? 0;
     next.set(place, i + 1);
+    // Tucked in behind its host only where it has really landed behind it:
+    // a host in the other row — an equipment on a land creature — leaves
+    // it an ordinary card in its own. The host carries a class of its own
+    // because it needs a z-index to be drawn over what is tucked in behind.
+    el.classList.toggle('has-equipment', hosts.has(c.uid));
+    el.classList.toggle('attached', Boolean(c.attachedTo) && place.children[i - 1]?.dataset.uid === c.attachedTo);
     if (place.children[i] !== el) place.insertBefore(el, place.children[i] ?? null);
   }
   // A card that has gone — removed, or another opponent's — leaves the
@@ -670,8 +697,11 @@ const MOVES = [
 
 // The cards beside this one in its row: its owner's half of one battlefield
 // row, which is as far as a card can be moved along. The same run
-// reorderCard works within, in the same order the row is drawn in.
-const runFor = (c) => G.cardsIn(game, c.owner, 'battlefield').filter((x) => G.isLand(x) === G.isLand(c));
+// reorderCard works within, in the same order the row is drawn in — an
+// attached equipment left out of it, since it is drawn behind its host and
+// goes wherever the host goes. A card that is itself attached is in no run,
+// so it is offered no move, which is what reorderCard would say too.
+const runFor = (c) => G.cardsIn(game, c.owner, 'battlefield').filter((x) => G.isLand(x) === G.isLand(c) && !x.attachedTo);
 
 // Stepping along the row a place at a time, for the keyboard and for a
 // finger: dragging is a mouse and a pen only, and a card's place on the
@@ -691,6 +721,28 @@ function moveItems(uid, zone) {
   return items;
 }
 
+// What an equipment on the battlefield can be put on: one item per creature
+// its owner has out, named, in the order they sit on the table. A target
+// picked from the menu rather than by pointing at a card afterwards — the
+// menu has no submenus, and a mode where the next click means something
+// else would be a second way of working the table for one feature's sake.
+function equipItems(uid, zone) {
+  const c = zone === 'battlefield' ? game.cards.find((x) => x.uid === uid) : null;
+  if (!c || !G.isEquipment(c)) return [];
+  const creatures = G.cardsIn(game, c.owner, 'battlefield').filter((x) => G.isCreature(x) && x.uid !== uid);
+  // Said rather than left out: with nothing to equip, the reason is the
+  // answer to why the items are missing.
+  if (!creatures.length) return [{ label: 'no creature to equip', title: 'its owner has none on the battlefield to put it on', disabled: true }];
+  const items = creatures.map((h) => ({
+    label: `equip ${h.name}`,
+    title: `tucked in behind ${h.name}`,
+    disabled: h.uid === c.attachedTo,
+    run: () => commit(G.equip(game, uid, h.uid)),
+  }));
+  if (c.attachedTo) items.push({ label: 'unequip', title: 'off again, and back in the row', run: () => commit(G.unequip(game, uid)) });
+  return items;
+}
+
 // What can be done with the card, read off the element: it knows its uid
 // and the zone it is in, which is all any of these need.
 function itemsFor(el) {
@@ -703,7 +755,7 @@ function itemsFor(el) {
   items.push({ label: 'copy', title: 'another of this card, beside it', run: () => commit(G.copyCard(game, uid)) });
   // Nothing in hand is on the table yet, so nothing there can be counted.
   if (zone !== 'hand') items.push({ label: 'add counter…', title: 'a +1/+1, or a kind of your own', run: () => openPicker(el) });
-  items.push(...moveItems(uid, zone));
+  items.push(...moveItems(uid, zone), ...equipItems(uid, zone));
   items.push('-');
   for (const [z, label] of MOVES) if (z !== zone) items.push({ label, run: () => commit(G.moveTo(game, uid, z)) });
   items.push('-', { label: 'remove', title: 'the card was never there (a mistake)', run: () => commit(G.remove(game, uid)) });
@@ -905,6 +957,9 @@ table.addEventListener('pointerdown', (e) => {
   const card = e.target.closest('.card');
   const tier = card?.closest('.tier');
   if (!tier) return;
+  // An attached equipment sits where its host sits and has no place of its
+  // own in the row, so there is nowhere to carry it to.
+  if (card.classList.contains('attached')) return;
   // Where it came from, to put it back if the drag comes to nothing.
   drag = { card, tier, home: card.nextElementSibling, startX: e.clientX, startY: e.clientY, moved: false };
 });
@@ -934,7 +989,10 @@ function overTier(x, y) {
 // that follows finds every card already where it belongs and moves nothing.
 function reorderUnder(x, y) {
   const next = [...drag.tier.children].find((el) => {
-    if (el === drag.card) return false;
+    // A creature and what is tucked in behind it are one thing to drop in
+    // front of or behind: the equipment is no place of its own to stop at,
+    // and stopping there would put the card somewhere render() would not.
+    if (el === drag.card || el.classList.contains('attached')) return false;
     const r = el.getBoundingClientRect();
     return y < r.top || (y < r.bottom && x < r.left + r.width / 2); // an earlier row, or this one's near half
   }) ?? null;

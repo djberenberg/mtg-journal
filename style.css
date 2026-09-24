@@ -22,6 +22,12 @@
   /* How much bigger a card is under the pointer. app.js reads it, to put
      the panel beside the size the card ends at. */
   --card-zoom: 1.06;
+  /* How much of an attached equipment its host covers: two thirds, so the
+     edge that shows is enough to read the art by and to right-click. The
+     second and later ones are covered further, so a creature carrying
+     three of them does not take the whole row. */
+  --equip-tuck: 0.66;
+  --equip-tuck-more: 0.82;
   --radius: 10px;
 }
 
@@ -474,6 +480,27 @@ h3 { font-size: 0.68rem; }
 }
 
 .card.tapped { width: var(--card-h); height: var(--card-w); }
+
+/* An equipment on a creature is drawn straight after it in the same row and
+   pulled back over it, so it reads as tucked in behind rather than standing
+   beside: the margin swallows the row's gap along with most of the card's
+   width, and what is left showing is enough to tell it by and to right-click.
+   A second one is pulled further still, so a creature carrying several fans
+   them out rather than taking up the row. */
+.card.attached {
+  margin-left: calc(-0.5rem - var(--card-w) * var(--equip-tuck));
+  z-index: 0;
+  opacity: 0.85; /* behind its host, and reading as behind it */
+}
+
+.card.attached + .card.attached { margin-left: calc(-0.5rem - var(--card-w) * var(--equip-tuck-more)); }
+.card.attached:hover { opacity: 1; }
+
+/* A later sibling paints over an earlier one, and the equipment comes after
+   its host: so the host needs a layer of its own to stay in front of what is
+   tucked in behind it. Before the hover rule below, whose higher layer still
+   brings an equipment to the front when it is pointed at. */
+.card.has-equipment { z-index: 1; }
 
 /* A little bigger under the pointer, and over its neighbours while it is.
    The box is scaled rather than widened, so the row behind it does not

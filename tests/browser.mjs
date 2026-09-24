@@ -18,7 +18,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 // one saved query for "lightn" and nothing for anything else.
 const fixtures = Object.fromEntries(readdirSync(join(root, 'tests/fixtures')).map((f) => [f.replace('.json', ''), JSON.parse(readFileSync(join(root, 'tests/fixtures', f)))]));
 const parseFixture = (n) => parseCard(fixtures[n]);
-const byName = { 'lightning bolt': 'bolt', bolt: 'bolt', 'llanowar elves': 'elves', elves: 'elves', 'delver of secrets': 'delver', delver: 'delver', forest: 'forest' };
+const byName = { 'lightning bolt': 'bolt', bolt: 'bolt', 'llanowar elves': 'elves', elves: 'elves', 'delver of secrets': 'delver', delver: 'delver', forest: 'forest', bonesplitter: 'bonesplitter' };
 const stub = `
   window.__requests = [];
   window.fetch = async (url, init) => {
@@ -26,7 +26,7 @@ const stub = `
     const u = new URL(url);
     const body = (() => {
       if (u.pathname === '/cards/autocomplete') return u.searchParams.get('q').toLowerCase().startsWith('lightn') ? ${JSON.stringify(fixtures.autocomplete)} : { object: 'catalog', data: [] };
-      if (u.pathname === '/cards/named') { const k = ${JSON.stringify(byName)}[u.searchParams.get('fuzzy').toLowerCase()]; return k ? ${JSON.stringify({ bolt: fixtures.bolt, elves: fixtures.elves, delver: fixtures.delver, forest: fixtures.forest })}[k] : ${JSON.stringify(fixtures.notfound)}; }
+      if (u.pathname === '/cards/named') { const k = ${JSON.stringify(byName)}[u.searchParams.get('fuzzy').toLowerCase()]; return k ? ${JSON.stringify({ bolt: fixtures.bolt, elves: fixtures.elves, delver: fixtures.delver, forest: fixtures.forest, bonesplitter: fixtures.bonesplitter })}[k] : ${JSON.stringify(fixtures.notfound)}; }
       return { object: 'error', status: 500, details: 'unexpected ' + url };
     })();
     await new Promise((r) => setTimeout(r, 30));
@@ -133,6 +133,8 @@ try {
   const zoomOf = (sel) => evalJs(`Math.round(new DOMMatrix(getComputedStyle(document.querySelector(${JSON.stringify(sel)})).transform).a * 1000) / 1000`);
   const fieldBoxes = (owner) => evalJs(`(()=>{const z=document.querySelector('.zone[data-owner="${owner}"][data-zone="battlefield"]');return {zone:z.getBoundingClientRect().width,cards:[...z.querySelectorAll('.card')].map(c=>c.getBoundingClientRect().width)}})()`);
   const menuItems = () => evalJs(`[...document.getElementById('menu').children].map(c=>c.tagName==='HR'?'-':c.textContent).join('|')`);
+  // The same, with a mark on each item that is offered but cannot be chosen.
+  const menuOffered = () => evalJs(`[...document.querySelectorAll('#menu [role="menuitem"]')].map(b=>b.textContent+(b.disabled?' (off)':'')).join('|')`);
   const menuRect = () => evalJs(`document.getElementById('menu').getBoundingClientRect().toJSON()`);
   const cardRect = (sel) => evalJs(`document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect().toJSON()`);
   const tickers = (side) => evalJs(`[...document.querySelectorAll('#cmd-dmg-${side} .ticker')].map(t=>({uid:t.dataset.uid, name:t.querySelector('.cmd-name').textContent, title:t.querySelector('.cmd-name').title, n:t.querySelector('.n').textContent, lethal:t.classList.contains('lethal'), labels:[...t.querySelectorAll('button')].map(b=>b.getAttribute('aria-label'))}))`);
@@ -493,6 +495,81 @@ try {
   await menuPick(`.card[data-uid="${forestUid}"]`, 'remove'); await sleep(50);
   await menuPick(`.card[data-uid="${(await zone('opp', 'battlefield')).find((c) => c.name === 'Forest').uid}"]`, 'remove'); await sleep(50);
   check('(both lands removed for the checks that follow)', (await zone('me', 'battlefield')).length === 1 && (await zone('opp', 'battlefield')).length === 1);
+
+  // equipment: put on a creature from the menu, and tucked in behind it
+  // How a card sits against the one before it in its row: how far the
+  // neighbour covers it, and which of the two is drawn in front.
+  const tucked = (uid) => evalJs(`(()=>{const e=document.querySelector('.card[data-uid="${uid}"]');const p=e.previousElementSibling;const r=e.getBoundingClientRect();const h=p?.getBoundingClientRect();return {attached:e.classList.contains('attached'), after:p?.dataset.uid, over:h?Math.round(h.right-r.left):null, width:Math.round(r.width), z:getComputedStyle(e).zIndex, hostZ:p?getComputedStyle(p).zIndex:null, hostMarked:Boolean(p?.classList.contains('has-equipment')), row:e.closest('.tier')?.dataset.tier}})()`);
+  const attachedTo = async (uid) => (await state()).cards.find((c) => c.uid === uid)?.attachedTo;
+  // A tucked card is pointed at by the edge of it that shows: its middle is
+  // under its host, which is drawn in front of it.
+  const showing = async (sel) => {
+    await evalJs(`document.querySelector(${'${JSON.stringify(sel)}'}).scrollIntoView({block:'center'})`);
+    await sleep(150);
+    const r = await cardRect(sel);
+    return { x: Math.round(r.right - 6), y: Math.round(r.top + r.height / 2) };
+  };
+  const pickAtEdge = async (sel, label) => { const p = await showing(sel); await rightClick(p.x, p.y); return pickItem(label); };
+  await toHand('bonesplitter');
+  const bonesUid = (await zone('me', 'hand')).find((c) => c.name === 'Bonesplitter').uid;
+  const bonesSel = `.card[data-uid="${bonesUid}"]`;
+  await rightClickAt(bonesSel);
+  check('an equipment in hand is offered nothing to equip: it goes on a creature from the table', !(await menuItems()).includes('equip'), await menuItems());
+  await pickItem('play'); await sleep(120);
+  check('played, it stands in my spells row beside the creature', (await rowOf('spells')).join('|') === [hand[1].uid, bonesUid].join('|'), JSON.stringify(await rowOf('spells')));
+  await rightClickAt(elvesSel);
+  check('a creature\'s own menu is unchanged: nothing to equip on it', !(await menuItems()).includes('equip'), await menuItems());
+  await key('Escape', 'Escape', 27); await sleep(50);
+  await rightClickAt(bonesSel);
+  check('the equipment offers the creature on its own battlefield, and not the one across the table', (await menuItems()) === 'copy|add counter…|move left|equip Llanowar Elves|-|to hand|to the graveyard|to exile|to the command zone|-|remove', await menuItems());
+  await key('Escape', 'Escape', 27); await sleep(50);
+  await toHand('delver');
+  const myDelver = (await zone('me', 'hand')).find((c) => c.name.startsWith('Delver')).uid;
+  await menuPick(`.card[data-uid="${myDelver}"]`, 'play'); await sleep(120);
+  await rightClickAt(bonesSel);
+  check('a second creature of mine is a second item, in the order they sit on the table', (await menuItems()).includes('equip Llanowar Elves|equip Delver of Secrets // Insectile Aberration'), await menuItems());
+  await key('Escape', 'Escape', 27); await sleep(50);
+  await menuPick(`.card[data-uid="${myDelver}"]`, 'remove'); await sleep(80);
+  await menuPick(elvesSel, 'to hand'); await sleep(120);
+  await rightClickAt(bonesSel);
+  check('with no creature of mine out it says why, rather than leaving the choice out with no reason', (await menuOffered()).includes('no creature to equip (off)'), await menuOffered());
+  await key('Escape', 'Escape', 27); await sleep(50);
+  await menuPick(elvesSel, 'play'); await sleep(120);
+  await menuPick(bonesSel, 'equip Llanowar Elves'); await sleep(150);
+  let tuck = await tucked(bonesUid);
+  u = await ui();
+  check('choosing the creature equips it: the log says so, and the save has it on that card', /I equip Llanowar Elves with Bonesplitter/.test(u.log[0]) && (await attachedTo(bonesUid)) === hand[1].uid, JSON.stringify({ log: u.log[0], on: await attachedTo(bonesUid) }));
+  check('and it is drawn straight after its host, tucked in behind it: covered by most of a card, and under it', tuck.attached && tuck.after === hand[1].uid && tuck.over > tuck.width / 2 && tuck.hostMarked && Number(tuck.z) < Number(tuck.hostZ) && tuck.row === 'spells', JSON.stringify(tuck));
+  check('and a reader is told what it is on, which otherwise only a pointer can see', (await el(bonesSel, "e.getAttribute('aria-label')")) === 'Bonesplitter, battlefield, on Llanowar Elves', await el(bonesSel, "e.getAttribute('aria-label')"));
+  let sliver = await showing(bonesSel);
+  await mouse('mouseMoved', sliver.x, sliver.y, 0); await sleep(250);
+  const raised = await evalJs(`getComputedStyle(document.querySelector('${bonesSel}')).zIndex`);
+  let pk2 = await peekUi(bonesSel);
+  check('hovering the edge that shows still brings it out in front of its host, with its own panel', Number(raised) > Number(tuck.hostZ) && !pk2.hidden && /Equipped creature gets \+2\/\+0/.test(pk2.text), JSON.stringify({ raised, hostZ: tuck.hostZ, text: pk2.text.slice(0, 40) }));
+  await unhover();
+  await shot('g-equipped');
+  sliver = await showing(bonesSel);
+  await rightClick(sliver.x, sliver.y);
+  check('the edge that shows is the equipment\'s own to right-click, not its host\'s: the creature it is on is still listed but cannot be chosen, and unequip joins the menu', (await menuOffered()).includes('equip Llanowar Elves (off)') && (await menuOffered()).includes('unequip'), await menuOffered());
+  check('an attached equipment is offered no move along the row: it goes where its host goes', !/move (left|right)/.test(await menuItems()), await menuItems());
+  await pickItem('unequip'); await sleep(150);
+  tuck = await tucked(bonesUid);
+  check('unequip takes it off and it stands in its own place in the row again', !tuck.attached && !tuck.hostMarked && tuck.over < 0 && (await attachedTo(bonesUid)) === undefined && /my Bonesplitter comes off Llanowar Elves/.test((await ui()).log[0]) && (await el(bonesSel, "e.getAttribute('aria-label')")) === 'Bonesplitter, battlefield', JSON.stringify(tuck));
+  await menuPick(bonesSel, 'equip Llanowar Elves'); await sleep(150);
+  await click('#undo'); await sleep(150);
+  check('undo steps the attachment back off', !(await tucked(bonesUid)).attached && (await attachedTo(bonesUid)) === undefined);
+  await menuPick(bonesSel, 'equip Llanowar Elves'); await sleep(150);
+  await send('Page.navigate', { url: `${BASE}/` }); await sleep(800);
+  tuck = await tucked(bonesUid);
+  check('the attachment survives a reload, tucked in behind its host again', tuck.attached && tuck.after === hand[1].uid && (await attachedTo(bonesUid)) === hand[1].uid, JSON.stringify(tuck));
+  logWas = (await ui()).log.length;
+  await menuPick(elvesSel, 'to the graveyard'); await sleep(900);
+  u = await ui();
+  check('the host sent to the graveyard takes the equipment off, and the move is the only line about it', !(await tucked(bonesUid)).attached && (await attachedTo(bonesUid)) === undefined && u.log.length === logWas + 1 && /my Llanowar Elves to graveyard/.test(u.log[0]), JSON.stringify({ log: u.log.slice(0, 2), on: await attachedTo(bonesUid) }));
+  await click('#undo'); await sleep(200);
+  check('undo brings the creature back with the equipment on it again', (await tucked(bonesUid)).attached && (await attachedTo(bonesUid)) === hand[1].uid);
+  await pickAtEdge(bonesSel, 'remove'); await sleep(120);
+  check('(the equipment is off the table, leaving the row as it was)', (await rowOf('spells')).join('|') === hand[1].uid && (await el(elvesSel, "e.classList.contains('has-equipment')")) === false, JSON.stringify(await zone('me', 'battlefield')));
 
   // counters
   const squares = () => evalJs(`[...document.querySelectorAll('${elvesSel} .counter')].map(s=>({n:s.querySelector('.n').textContent,k:s.querySelector('.k').textContent,cid:s.dataset.cid,left:parseFloat(s.style.getPropertyValue('--x')),top:parseFloat(s.style.getPropertyValue('--y'))}))`);

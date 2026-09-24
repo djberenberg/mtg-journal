@@ -312,7 +312,10 @@ h3 { font-size: 0.68rem; }
 
 .life { display: inline-flex; align-items: center; gap: 0.2rem; text-transform: none; letter-spacing: 0; }
 .life button { padding: 0 0.45rem; font-size: 0.75rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.life output {
+
+/* The output and its input take the same box, so swapping which is hidden
+   does not nudge anything else in the row. */
+.life output, .life-edit {
   min-width: 2.4ch;
   text-align: center;
   font-size: 1.15rem;
@@ -320,6 +323,33 @@ h3 { font-size: 0.68rem; }
   color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
+
+.life output {
+  padding: 0 0.15rem;
+  border-radius: 4px;
+  cursor: text;
+}
+
+.life output:hover { background: var(--raised); }
+.life output:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.life-edit {
+  width: 3.2ch;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  /* The browser's own up/down spinner does not fit a box this compact and
+     crowds out the digit; the -5/-1/+1/+5 buttons already do its job. */
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.life-edit::-webkit-outer-spin-button, .life-edit::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+.life-edit[hidden] { display: none; }
 
 .zone {
   --card-h: calc(var(--card-w) * 680 / 488);
@@ -587,4 +617,25 @@ dialog legend { padding: 0; margin-bottom: 0.3rem; font-size: 0.72rem; letter-sp
 dialog label { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; }
 dialog input[type="radio"] { accent-color: var(--accent); }
 dialog .warn { margin: 0 0 0.9rem; color: var(--danger); font-size: 0.85rem; }
+
+#new-life {
+  width: 5ch;
+  font: inherit;
+  padding: 0.2rem 0.4rem;
+  color: var(--fg);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  /* The presets below are the quick way to step it; the browser's own
+     spinner only crowds the digits in a field this narrow. */
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+#new-life::-webkit-outer-spin-button, #new-life::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+#new-life:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+
+/* A shortcut into the field above, not a choice of its own: sized and
+   coloured like the field's neighbour rather than a fieldset option. */
+dialog .preset { padding: 0.2rem 0.55rem; font-size: 0.8rem; }
 dialog .buttons { display: flex; justify-content: flex-end; gap: 0.5rem; }

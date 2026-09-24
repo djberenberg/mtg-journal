@@ -225,6 +225,29 @@ try {
   await click('[data-life="opp"][data-by="-5"]'); await click('[data-life="opp"][data-by="-1"]'); await click('[data-life="me"][data-by="1"]'); await sleep(50); u = await ui();
   check('life buttons: opponent 20 -> 14, me 21, logged with the result', u.opp === '14' && u.me === '21' && /I gain 1 life \(21\)/.test(u.log[0]) && /opponent loses 1 life \(14\)/.test(u.log[1]), JSON.stringify({ opp: u.opp, me: u.me, log: u.log.slice(0, 2) }));
 
+  // life totals are typeable, at the table: click opens an input, keeps it
+  // out of render()'s way, and Enter or Escape ends it
+  await click('#life-me'); await sleep(50);
+  check('clicking my life total swaps it for an input holding the current value', (await el('#life-me', 'e.hidden')) === true && (await el('#life-me + .life-edit', 'e.hidden')) === false && (await el('#life-me + .life-edit', 'e.value')) === '21', JSON.stringify(await el('#life-me + .life-edit', 'e.value')));
+  await evalJs(`document.getElementById('life-me').nextElementSibling.value = ''`); await type('31');
+  await key('Enter', 'Enter', 13); await sleep(50); u = await ui();
+  check('enter commits the typed total and logs it, and the output comes back', u.me === '31' && /my life is now 31/.test(u.log[0]) && (await el('#life-me', 'e.hidden')) === false && (await el('#life-me + .life-edit', 'e.hidden')) === true, JSON.stringify({ me: u.me, log: u.log[0] }));
+
+  await click('#life-me'); await sleep(50);
+  await evalJs(`document.getElementById('life-me').nextElementSibling.value = ''`); await type('99');
+  await key('Escape', 'Escape', 27); await sleep(50); u = await ui();
+  check('escape cancels without changing the total', u.me === '31' && (await el('#life-me', 'e.hidden')) === false && (await el('#life-me + .life-edit', 'e.hidden')) === true, u.me);
+
+  await click('#life-opp'); await sleep(50);
+  await evalJs(`document.getElementById('life-opp').nextElementSibling.value = ''`); await type('12');
+  await key('Enter', 'Enter', 13); await sleep(50); u = await ui();
+  check('the opponent\'s life total edits the opponent in view, not me', u.opp === '12' && u.me === '31' && /opponent's life is now 12/.test(u.log[0]), JSON.stringify({ opp: u.opp, me: u.me, log: u.log[0] }));
+
+  await click('#undo'); await sleep(80); u = await ui();
+  check('undo brings a typed life back', u.opp === '14' && u.me === '31', JSON.stringify(u));
+  await click('#undo'); await sleep(80); u = await ui();
+  check('and again for the other typed total', u.me === '21' && u.opp === '14', JSON.stringify(u));
+
   // moves and remove
   await rightClickAt(elvesSel);
   items = await menuItems();
@@ -486,8 +509,20 @@ try {
   check('choosing new game from the menu puts the menu away and opens the dialog, warning that the table is cleared', (await fromGameMenu('new game')) === 'ok' && (await el('#menu', 'e.hidden')) && (await el('#new-dialog', 'e.open')) && !(await el('#new-warn', 'e.hidden')));
   await click('#new-cancel'); await sleep(50);
   check('cancel closes it and changes nothing', !(await el('#new-dialog', 'e.open')) && (await state()).cards.length === cardCount);
+
+  // starting life is typed, with two presets that fill the field but do not submit
   await fromGameMenu('new game');
-  await click('input[name="opponents"][value="3"]'); await click('input[name="life"][value="40"]');
+  await click('[data-life-preset="40"]');
+  check('the 40 preset fills the field without submitting', (await el('#new-life', 'e.value')) === '40' && (await el('#new-dialog', 'e.open')), await el('#new-life', 'e.value'));
+  await click('[data-life-preset="20"]');
+  check('and the 20 preset fills it back, still without submitting', (await el('#new-life', 'e.value')) === '20' && (await el('#new-dialog', 'e.open')), await el('#new-life', 'e.value'));
+  await evalJs(`document.getElementById('new-life').value = '34'`);
+  await evalJs(`document.getElementById('new-form').requestSubmit()`); await sleep(200); u = await ui();
+  check('a typed number starts everyone at it and logs it', (await state()).cards.length === 0 && u.me === '34' && u.opp === '34' && /new game: 1 opponent, 34 life/.test(u.log[0]), JSON.stringify({ me: u.me, opp: u.opp, log: u.log[0] }));
+
+  await fromGameMenu('new game');
+  check('the dialog reopens showing the current starting life, not always 20', (await el('#new-life', 'e.value')) === '34');
+  await click('input[name="opponents"][value="3"]'); await click('[data-life-preset="40"]');
   await evalJs(`document.getElementById('new-form').requestSubmit()`); await sleep(200); u = await ui(); o = await oppUi();
   check('three opponents at 40: the table is cleared, everyone at 40, three tabs', (await state()).cards.length === 0 && u.turn === 'turn 1 · my turn' && u.me === '40' && u.opp === '40' && /3 opponents, 40 life/.test(u.log[0]) && !o.tabsHidden && o.tabs.length === 3 && o.tabs[0].selected && o.name === 'opponent 1', JSON.stringify({ turn: u.turn, me: u.me, o }));
   check('the dialog closed and the table has no card elements left', !(await el('#new-dialog', 'e.open')) && (await evalJs(`document.querySelectorAll('.card').length`)) === 0);

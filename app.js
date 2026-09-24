@@ -167,7 +167,9 @@ function renderOpponents() {
     return b;
   }));
   $('opp-name').textContent = G.label(game, view.opp);
-  $('life-opp').textContent = game.life[view.opp];
+  // Not while its input is open: a typed-but-uncommitted total would be
+  // overwritten out from under the player.
+  if (lifeEditing !== 'opp') $('life-opp').textContent = game.life[view.opp];
 }
 
 function render() {
@@ -201,7 +203,7 @@ function render() {
   // have put something there.
   document.querySelector('[data-pile="opp:hand"]').hidden = G.cardsIn(game, view.opp, 'hand').length === 0;
 
-  $('life-me').textContent = game.life.me;
+  if (lifeEditing !== 'me') $('life-me').textContent = game.life.me;
   $('turn').textContent = `turn ${game.turn} · ${G.label(game, game.active, 'possessive')} turn`;
   undoBtn.disabled = history.length === 0;
 
@@ -746,6 +748,50 @@ table.addEventListener('click', (e) => {
   if (card && e.target.tagName === 'IMG' && card.dataset.zone === 'battlefield') commit(G.toggleTap(game, card.dataset.uid));
 });
 
+// --- life, typed --------------------------------------------------------
+
+// Which life total has its input open: 'me', 'opp', or null for neither.
+// render() reads this too, so it never overwrites what is being typed.
+let lifeEditing = null;
+
+const lifeEls = (group) => { const out = $(`life-${group}`); return { out, input: out.nextElementSibling }; };
+
+function openLifeEdit(group) {
+  const { out, input } = lifeEls(group);
+  lifeEditing = group;
+  input.value = out.textContent;
+  out.hidden = true;
+  input.hidden = false;
+  input.focus();
+  input.select();
+}
+
+// Shared by both Enter (via the input's own blur) and Escape: the input
+// goes away and the total comes back either way, so a stray blur after
+// Escape has already closed it never fires a second commit.
+function closeLifeEdit(group) {
+  const { out, input } = lifeEls(group);
+  lifeEditing = null;
+  input.hidden = true;
+  out.hidden = false;
+}
+
+for (const group of ['me', 'opp']) {
+  const { out, input } = lifeEls(group);
+  out.addEventListener('click', () => openLifeEdit(group));
+  out.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); openLifeEdit(group); } });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); } // blur does the committing
+    else if (e.key === 'Escape') { e.preventDefault(); closeLifeEdit(group); out.focus(); }
+  });
+  input.addEventListener('blur', () => {
+    if (lifeEditing !== group) return; // already closed, by Escape
+    const raw = input.value.trim();
+    closeLifeEdit(group);
+    if (raw !== '' && Number.isFinite(Number(raw))) commit(G.setLife(game, group === 'me' ? 'me' : view.opp, Number(raw)));
+  });
+}
+
 // --- turns, log, new game ---------------------------------------------
 
 $('next').addEventListener('click', () => {
@@ -770,6 +816,7 @@ const GAME_MENU = [
     title: 'start over; asks for opponents and life',
     run: () => {
       $('new-warn').hidden = game.cards.length === 0 && game.log.length <= 1;
+      $('new-life').value = game.startingLife;
       dialog.showModal();
     },
   },
@@ -804,6 +851,12 @@ const cardMenu = () => [
 $('menu-card').addEventListener('click', (e) => openMenu(e.currentTarget, cardMenu()));
 
 $('new-cancel').addEventListener('click', () => dialog.close());
+
+// A preset fills the field for editing, same as typing it; it does not
+// start the game itself, so an accidental click costs nothing.
+for (const btn of dialog.querySelectorAll('.preset')) {
+  btn.addEventListener('click', () => { $('new-life').value = btn.dataset.lifePreset; });
+}
 
 $('new-form').addEventListener('submit', (e) => {
   e.preventDefault();

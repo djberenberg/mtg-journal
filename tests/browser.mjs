@@ -100,6 +100,25 @@ try {
     return p;
   };
   const unhover = async () => { await mouse('mouseMoved', 4, 4, 0); await sleep(250); };
+  const centre = async (sel) => JSON.parse(await evalJs(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});if(!e)return 'null';const r=e.getBoundingClientRect();return JSON.stringify({x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2),left:Math.round(r.left),right:Math.round(r.right)})})()`));
+  // A card is carried with the pointer really pressed and moved, in steps,
+  // so the row reorders under it on the way. It is dropped just inside the
+  // near edge of another card ('before'), just inside its far edge ('after'),
+  // or on the middle of whatever is named ('onto'). What comes back is the
+  // card as it was mid-drag, read after the last move and before the drop.
+  const dragOnto = async (sel, ontoSel, side) => {
+    await evalJs(`document.querySelector(${JSON.stringify(sel)}).scrollIntoView({block:'center'})`);
+    await sleep(200);
+    const from = await centre(sel);
+    const to = await centre(ontoSel);
+    const x = side === 'before' ? to.left + 4 : side === 'after' ? to.right - 4 : to.x;
+    await mouse('mousePressed', from.x, from.y);
+    for (let i = 1; i <= 8; i++) await mouse('mouseMoved', Math.round(from.x + ((x - from.x) * i) / 8), Math.round(from.y + ((to.y - from.y) * i) / 8));
+    const during = JSON.parse(await evalJs(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});const s=getComputedStyle(e);return JSON.stringify({dragging:e.classList.contains('dragging'),opacity:Math.round(parseFloat(s.opacity)*100)/100,zoom:Math.round(new DOMMatrix(s.transform).a*1000)/1000,cursor:s.cursor,moved:e.style.transform!=='',at:[...e.parentElement.children].indexOf(e)})})()`));
+    await mouse('mouseReleased', x, to.y, 0);
+    await sleep(150);
+    return during;
+  };
   const peekUi = (sel = '.card') => evalJs(`(()=>{const p=document.getElementById('peek');const r=p.getBoundingClientRect();const c=document.querySelector(${JSON.stringify(sel)})?.getBoundingClientRect()??{left:0,right:0};return {hidden:p.hidden,text:p.textContent,rows:[...p.children].map(e=>e.className),aria:p.getAttribute('aria-hidden'),fixed:getComputedStyle(p).position,gap:Math.round((r.left-c.right)*10)/10,width:Math.round(r.width),inView:r.left>=8&&r.top>=8&&r.right<=innerWidth-8&&r.bottom<=innerHeight-8}})()`);
   const ghosts = () => evalJs(`[...document.querySelectorAll('.ghost')].map(g=>({effect:g.dataset.effect, halves:g.querySelectorAll('.ghost-half').length, imgs:g.querySelectorAll('img').length, fixed:getComputedStyle(g).position, events:getComputedStyle(g).pointerEvents, hidden:g.getAttribute('aria-hidden'), running:g.getAnimations({subtree:true}).map(a=>a.animationName).sort()}))`);
   const zoomOf = (sel) => evalJs(`Math.round(new DOMMatrix(getComputedStyle(document.querySelector(${JSON.stringify(sel)})).transform).a * 1000) / 1000`);
@@ -377,6 +396,49 @@ try {
   await click(`.card[data-uid="${forestUid}"] img`); await sleep(100);
   check('a land taps like any permanent', (await zone('me', 'battlefield')).find((c) => c.name === 'Forest').tapped);
   await shot('8-lands');
+
+  // dragging cards into order within a row
+  await menuPick(elvesSel, 'copy'); await sleep(60);
+  await menuPick(elvesSel, 'copy'); await sleep(60);
+  await menuPick(`.card[data-uid="${forestUid}"]`, 'copy'); await sleep(60);
+  const rowOf = async (tier) => (await zone('me', 'battlefield')).filter((c) => c.tier === tier).map((c) => c.uid);
+  const savedRow = async (lands) => (await state()).cards.filter((c) => c.owner === 'me' && c.zone === 'battlefield' && /\bLand\b/.test(c.typeLine) === lands).map((c) => c.uid);
+  let order = await rowOf('spells');
+  const lands = await rowOf('lands');
+  check('(three creatures in my spells row and two lands in the other, for the drags)', order.length === 3 && order[0] === hand[1].uid && lands.length === 2 && (await savedRow(false)).join('|') === order.join('|'), JSON.stringify({ order, lands }));
+  let logWas = (await ui()).log.length;
+  let carried = await dragOnto(`.card[data-uid="${order[1]}"]`, `.card[data-uid="${order[0]}"]`, 'before');
+  let now = await rowOf('spells');
+  check('dragging the second creature in front of the first reorders the row, and the saved game agrees', now.join('|') === [order[1], order[0], order[2]].join('|') && (await savedRow(false)).join('|') === now.join('|'), JSON.stringify({ order, now, saved: await savedRow(false) }));
+  check('mid-drag the card is carried: raised, see-through, under the pointer, not zoomed, and already first in the row', carried.dragging && carried.opacity === 0.85 && carried.zoom === 1 && carried.cursor === 'grabbing' && carried.moved && carried.at === 0, JSON.stringify(carried));
+  check('the drag leaves no log line: where a card sits is not a move in the game', (await ui()).log.length === logWas, JSON.stringify((await ui()).log.slice(0, 2)));
+  check('and it did not tap the card it carried, nor leave it carrying anything', !(await zone('me', 'battlefield')).find((c) => c.uid === order[1]).tapped && (await evalJs(`document.querySelectorAll('.card.dragging').length`)) === 0 && (await el(`.card[data-uid="${order[1]}"]`, 'e.style.transform')) === '');
+  check('the lands row was left alone', (await rowOf('lands')).join('|') === lands.join('|'));
+  await shot('f-reordered');
+  await clickAt(`.card[data-uid="${order[1]}"]`); await sleep(80);
+  check('a press that does not travel is still a click, and still taps the card', (await zone('me', 'battlefield')).find((c) => c.uid === order[1]).tapped);
+  await clickAt(`.card[data-uid="${order[1]}"]`); await sleep(80);
+  check('(untapped again)', !(await zone('me', 'battlefield')).find((c) => c.uid === order[1]).tapped);
+
+  // a row at a time: a land dragged at the spells row goes back where it was
+  const saveWas = JSON.stringify(await state());
+  carried = await dragOnto(`.card[data-uid="${lands[0]}"]`, '.zone[data-owner="me"] .tier[data-tier="spells"]', 'onto');
+  check('a land cannot be dropped into the spells row: it is carried, but both rows are as they were and nothing was saved', carried.dragging && (await rowOf('lands')).join('|') === lands.join('|') && (await rowOf('spells')).join('|') === now.join('|') && JSON.stringify(await state()) === saveWas, JSON.stringify({ carried, lands: await rowOf('lands'), spells: await rowOf('spells') }));
+  check('the land it carried is back in its own row, carrying nothing', (await el(`.card[data-uid="${lands[0]}"]`, "e.closest('.tier').dataset.tier")) === 'lands' && (await el(`.card[data-uid="${lands[0]}"]`, 'e.style.transform')) === '' && (await evalJs(`document.querySelectorAll('.card.dragging').length`)) === 0);
+
+  await send('Page.navigate', { url: `${BASE}/` }); await sleep(800);
+  check('the order survives a reload', (await rowOf('spells')).join('|') === now.join('|'), JSON.stringify(await rowOf('spells')));
+  // The reload emptied the undo stack, so this drag is the one undo takes back.
+  await dragOnto(`.card[data-uid="${now[0]}"]`, `.card[data-uid="${now[2]}"]`, 'after');
+  check('a card dropped past the last of its row goes to the end of it', (await rowOf('spells')).join('|') === [now[1], now[2], now[0]].join('|'), JSON.stringify(await rowOf('spells')));
+  await click('#undo'); await sleep(80);
+  check('undo puts the order back, on the table and in the save', (await rowOf('spells')).join('|') === now.join('|') && (await savedRow(false)).join('|') === now.join('|'), JSON.stringify(await rowOf('spells')));
+
+  await menuPick(`.card[data-uid="${order[1]}"]`, 'remove'); await sleep(50);
+  await menuPick(`.card[data-uid="${order[2]}"]`, 'remove'); await sleep(50);
+  await menuPick(`.card[data-uid="${lands[1]}"]`, 'remove'); await sleep(50);
+  check('(the copies are removed, leaving the row as it was)', (await rowOf('spells')).join('|') === hand[1].uid && (await rowOf('lands')).join('|') === forestUid, JSON.stringify(await zone('me', 'battlefield')));
+
   await menuPick(`.card[data-uid="${forestUid}"]`, 'remove'); await sleep(50);
   await menuPick(`.card[data-uid="${(await zone('opp', 'battlefield')).find((c) => c.name === 'Forest').uid}"]`, 'remove'); await sleep(50);
   check('(both lands removed for the checks that follow)', (await zone('me', 'battlefield')).length === 1 && (await zone('opp', 'battlefield')).length === 1);

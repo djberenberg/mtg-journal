@@ -641,7 +641,9 @@ menu.addEventListener('keydown', (e) => {
   e.preventDefault();
 });
 
-window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+// Escape calls off whatever is in hand: the menu that is up, or the card
+// being carried, which goes back where it was picked up from.
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (drag?.card) endDrag(false); closeMenu(); } });
 
 // Any click outside closes it. The opener's own click is its toggle, which
 // is handled where the menu is opened; this runs after that.
@@ -691,6 +693,9 @@ const table = document.querySelector('.table');
 // menu, so its text can still be cut and pasted.
 table.addEventListener('contextmenu', (e) => {
   if (e.target.closest('.ctr-pick')) return;
+  // A hand is on the card already: a menu over what is being carried would
+  // be asking about a card that is halfway somewhere else.
+  if (drag) { e.preventDefault(); return; }
   const card = e.target.closest('.card');
   if (!card) return;
   e.preventDefault();
@@ -779,8 +784,9 @@ function placePeek() {
 // and stay there with nothing to move away.
 table.addEventListener('pointerover', (e) => {
   // A menu is up to be chosen from; a panel over it, or over the card it
-  // belongs to, is in the way.
-  if (e.pointerType === 'touch' || menuOpen()) return;
+  // belongs to, is in the way. So is one about a card being carried, which
+  // would follow it over every card it passes.
+  if (e.pointerType === 'touch' || menuOpen() || drag?.card) return;
   const card = e.target.closest('.card');
   // Crossing from the image onto a counter is not arriving at a new card.
   if (card && card !== peekCard) showPeek(card);
@@ -828,54 +834,154 @@ pick.addEventListener('submit', (e) => {
 pickKind.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePicker(); });
 pickKind.addEventListener('blur', () => setTimeout(() => { if (!pick.contains(document.activeElement)) closePicker(); }, 120));
 
-// Dragging a square about its card. Position is set in pixels while the
-// pointer is down and committed, when it is let go, as a fraction of the
-// room the square has to move in; so it keeps its place on the card when
-// the card changes size or turns on its side, and never pokes out.
+// --- dragging ---------------------------------------------------------
+
+// Two things on the table are dragged: a counter square about its card, and
+// a card into a new place in its row. One press starts either, and both wait
+// for the pointer to travel a little before anything moves, so a press that
+// stays put is still the click it looks like.
+//
+// A square's position is set in pixels while the pointer is down and
+// committed, when it is let go, as a fraction of the room it has to move in;
+// so it keeps its place on the card when the card changes size or turns on
+// its side, and never pokes out.
 let drag = null;
+// The click the browser sends after a drag is the drag's own, not a tap.
+// Cleared at the next press, so it can never eat a later click.
+let dragged = false;
+
+const CARD_DRAG_PX = 4; // a card is a bigger thing to nudge than a square, whose threshold is 3
 
 table.addEventListener('pointerdown', (e) => {
+  dragged = false;
+  if (e.button !== 0 || e.target.closest('button') || e.target.closest('.ctr-pick')) return;
   const sq = e.target.closest('.counter');
-  if (!sq || e.target.closest('button') || e.button !== 0) return;
-  const layer = sq.parentElement;
-  const card = sq.closest('.card');
-  // The card the square is on is scaled up under the pointer, so a pixel of
-  // pointer travel is less than a pixel of the square's own box; without
-  // this the square would run ahead of the pointer dragging it. The size it
-  // is heading for, not the one it has: the growing may still be under way.
-  const scale = card.matches(':hover') ? CARD_ZOOM : 1;
-  drag = { sq, layer, uid: card.dataset.uid, scale, startX: e.clientX, startY: e.clientY, left: sq.offsetLeft, top: sq.offsetTop, moved: false };
-  sq.setPointerCapture?.(e.pointerId);
-  e.preventDefault();
+  if (sq) {
+    const layer = sq.parentElement;
+    const card = sq.closest('.card');
+    // The card the square is on is scaled up under the pointer, so a pixel of
+    // pointer travel is less than a pixel of the square's own box; without
+    // this the square would run ahead of the pointer dragging it. The size it
+    // is heading for, not the one it has: the growing may still be under way.
+    const scale = card.matches(':hover') ? CARD_ZOOM : 1;
+    drag = { sq, layer, uid: card.dataset.uid, scale, startX: e.clientX, startY: e.clientY, left: sq.offsetLeft, top: sq.offsetTop, moved: false };
+    sq.setPointerCapture?.(e.pointerId);
+    e.preventDefault();
+    return;
+  }
+  // A card on the battlefield is picked up and put down elsewhere in its own
+  // row; a tier is the row, and only the battlefield has them. Mouse and pen
+  // only: claiming a touch would need touch-action: none on every card,
+  // which would stop a phone scrolling the page. Tap-to-tap still works.
+  if (e.pointerType === 'touch') return;
+  const card = e.target.closest('.card');
+  const tier = card?.closest('.tier');
+  if (!tier) return;
+  // Where it came from, to put it back if the drag comes to nothing.
+  drag = { card, tier, home: card.nextElementSibling, startX: e.clientX, startY: e.clientY, moved: false };
 });
 
-table.addEventListener('pointermove', (e) => {
-  if (!drag) return;
-  const dx = (e.clientX - drag.startX) / drag.scale;
-  const dy = (e.clientY - drag.startY) / drag.scale;
-  if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 3) return;
-  drag.moved = true;
-  drag.sq.classList.add('dragging');
-  const maxX = drag.layer.clientWidth - drag.sq.offsetWidth;
-  const maxY = drag.layer.clientHeight - drag.sq.offsetHeight;
-  drag.sq.style.left = `${Math.max(0, Math.min(maxX, drag.left + dx))}px`;
-  drag.sq.style.top = `${Math.max(0, Math.min(maxY, drag.top + dy))}px`;
-});
-
-function endDrag() {
-  if (!drag) return;
-  const { sq, layer, uid, moved } = drag;
-  drag = null;
-  sq.classList.remove('dragging');
-  if (!moved) return;
-  const roomX = layer.clientWidth - sq.offsetWidth;
-  const roomY = layer.clientHeight - sq.offsetHeight;
-  commit(G.moveCounter(game, uid, sq.dataset.cid, roomX > 0 ? sq.offsetLeft / roomX : 0, roomY > 0 ? sq.offsetTop / roomY : 0));
-  render(); // the commit may be a no-op (same place); put the fractions back either way
+// Where the card lies when it is not being carried: the inline transform is
+// the carrying, and while it is off the hover zoom is off with it, so what
+// comes back is the box the row has laid out for it.
+function restingBox(el) {
+  const held = el.style.transform;
+  el.style.transform = 'none';
+  const box = el.getBoundingClientRect();
+  el.style.transform = held;
+  return box;
 }
 
-table.addEventListener('pointerup', endDrag);
-table.addEventListener('pointercancel', endDrag);
+// Live reordering rather than a marker: as the pointer passes the middle of
+// a neighbour, the card takes its place there and then, so the row shows the
+// order it will be left in. render() draws in state order, so the commit
+// that follows finds every card already where it belongs and moves nothing.
+function reorderUnder(x, y) {
+  const next = [...drag.tier.children].find((el) => {
+    if (el === drag.card) return false;
+    const r = el.getBoundingClientRect();
+    return y < r.top || (y < r.bottom && x < r.left + r.width / 2); // an earlier row, or this one's near half
+  }) ?? null;
+  if (next !== drag.card.nextElementSibling) drag.tier.insertBefore(drag.card, next);
+}
+
+// The card follows the pointer from wherever the row has just put it, so the
+// same spot on it stays under the pointer as its neighbours shuffle about.
+function carry(x, y) {
+  const r = restingBox(drag.card);
+  drag.card.style.transform = `translate(${x - r.left - drag.grabX}px, ${y - r.top - drag.grabY}px)`;
+}
+
+function onPointerMove(e) {
+  if (!drag) return;
+  if (drag.sq) {
+    const dx = (e.clientX - drag.startX) / drag.scale;
+    const dy = (e.clientY - drag.startY) / drag.scale;
+    if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 3) return;
+    drag.moved = true;
+    drag.sq.classList.add('dragging');
+    const maxX = drag.layer.clientWidth - drag.sq.offsetWidth;
+    const maxY = drag.layer.clientHeight - drag.sq.offsetHeight;
+    drag.sq.style.left = `${Math.max(0, Math.min(maxX, drag.left + dx))}px`;
+    drag.sq.style.top = `${Math.max(0, Math.min(maxY, drag.top + dy))}px`;
+    return;
+  }
+  if (!drag.moved && Math.abs(e.clientX - drag.startX) + Math.abs(e.clientY - drag.startY) < CARD_DRAG_PX) return;
+  if (!drag.moved) {
+    drag.moved = true;
+    drag.card.classList.add('dragging');
+    // Measured before the first step, so the card is picked up by the point
+    // it was pressed on rather than jumping to its middle.
+    const r = restingBox(drag.card);
+    drag.grabX = drag.startX - r.left;
+    drag.grabY = drag.startY - r.top;
+    hidePeek(); // a panel about the card in hand, following it over the others
+    closeMenu();
+  }
+  reorderUnder(e.clientX, e.clientY);
+  carry(e.clientX, e.clientY);
+}
+
+// keep tells a drop from a drag that came to nothing: a card released
+// outside its row, cancelled, or called off with Escape goes back where it
+// was picked up from and commits nothing. A square is let go where it lies
+// either way: it never left the card it belongs to.
+function endDrag(keep = true) {
+  if (!drag) return;
+  const { sq, layer, uid, card, tier, home, moved } = drag;
+  drag = null;
+  if (sq) {
+    sq.classList.remove('dragging');
+    if (!moved) return;
+    const roomX = layer.clientWidth - sq.offsetWidth;
+    const roomY = layer.clientHeight - sq.offsetHeight;
+    commit(G.moveCounter(game, uid, sq.dataset.cid, roomX > 0 ? sq.offsetLeft / roomX : 0, roomY > 0 ? sq.offsetTop / roomY : 0));
+    render(); // the commit may be a no-op (same place); put the fractions back either way
+    return;
+  }
+  card.classList.remove('dragging');
+  card.style.transform = '';
+  if (!moved) return;
+  dragged = true; // the click that follows is this drag's, not a tap
+  if (!keep) { tier.insertBefore(card, home); return; }
+  // The element is already where it was dropped: the card in front of it is
+  // the one to go in front of, and nothing after it means the end of the row.
+  commit(G.reorderCard(game, card.dataset.uid, card.nextElementSibling?.dataset.uid ?? null));
+}
+
+function onPointerUp(e) {
+  // A card let go anywhere but the row it came from was never going there:
+  // a drag reorders one row, and does not move a card out of it.
+  const r = drag?.card && drag.tier.getBoundingClientRect();
+  endDrag(!r || (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom));
+}
+
+// On the window, not the table: a card is let go wherever the pointer has
+// got to, and one released over the log or off the page would otherwise
+// still be stuck to it.
+window.addEventListener('pointermove', onPointerMove);
+window.addEventListener('pointerup', onPointerUp);
+window.addEventListener('pointercancel', () => endDrag(false));
 
 // --- the table --------------------------------------------------------
 
@@ -898,6 +1004,9 @@ table.addEventListener('click', (e) => {
     commit(G.adjustCommanderDamage(game, row.dataset.side === 'me' ? 'me' : view.opp, btn.closest('.ticker').dataset.uid, Number(btn.dataset.cmd)));
     return;
   }
+  // A press that travelled was a drag, and the click it ends with is the
+  // drag's: the card was carried, not pointed at.
+  if (dragged) { dragged = false; return; }
   // Everything else a card can do is in its menu; a left click on one is
   // the tap, and only on the battlefield.
   const card = e.target.closest('.card');

@@ -467,6 +467,10 @@ h3 { font-size: 0.68rem; }
   /* A right-click is what a card is for, and the pointer says so wherever
      a left click does not already tap. */
   cursor: context-menu;
+  /* A card on the battlefield is dragged by its face: without this the drag
+     would smear a text selection across the table instead. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .card.tapped { width: var(--card-h); height: var(--card-w); }
@@ -476,6 +480,18 @@ h3 { font-size: 0.68rem; }
    shuffle along, and a tapped card keeps the rotation on its image. */
 .card:hover { transform: scale(var(--card-zoom)); z-index: 3; }
 
+/* Carried: over the row it is being put in order in, a little see-through so
+   what it passes over shows, and not zoomed — the pointer is holding the
+   card, not pointing at it. After the hover rule, so it wins the transform:
+   the one it wears while it is carried is set on the element itself, and the
+   transition would leave it trailing behind the pointer. */
+.card.dragging {
+  transform: none;
+  transition: none;
+  z-index: 4;
+  opacity: 0.85;
+}
+
 .card img {
   display: block;
   width: var(--card-w);
@@ -484,14 +500,14 @@ h3 { font-size: 0.68rem; }
   background: var(--raised);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
   transition: transform 0.15s ease, filter 0.15s ease;
-  user-select: none;
-  -webkit-user-select: none;
 }
 
 .card.tapped img { transform: rotate(90deg); filter: brightness(0.7); }
 .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .battlefield .card.permanent img { cursor: pointer; }
 .battlefield .card.permanent:hover img { box-shadow: 0 0 0 2px var(--accent), 0 2px 8px rgba(0, 0, 0, 0.6); }
+/* On the image too, which has a pointer of its own for the tap. */
+.card.dragging, .card.dragging img { cursor: grabbing; }
 
 /* A commander wears a mark wherever it is, so it can be told from the
    rest once it is on the battlefield. */

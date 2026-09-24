@@ -68,8 +68,7 @@ function show(opp) {
 // --- drawing ----------------------------------------------------------
 
 // Card elements are kept, not rebuilt, so an image loads once and a card
-// that changes zone moves rather than flickers. appendChild on an element
-// already in the tree moves it, which also puts each zone in state order.
+// that changes zone moves rather than flickers.
 const cardEls = new Map();
 
 // What a card says, in parts rather than one blob of text: the panel gives
@@ -106,7 +105,17 @@ function cardEl(c) {
     img.loading = 'lazy';
     const layer = document.createElement('div');
     layer.className = 'counters';
-    el.append(img, layer);
+    // What the card says, for a screen reader: the same words the hover
+    // panel shows a pointer, which is hidden from the reader. A description
+    // rather than more label, so focusing a card says which card and where
+    // it is first, and the rules text after, where it can be skipped.
+    const desc = document.createElement('div');
+    desc.className = 'sr';
+    desc.id = `card-desc-${c.uid}`;
+    const d = details(c);
+    desc.textContent = [d.manaCost, d.typeLine, d.oracleText, d.stats].filter(Boolean).join('. ');
+    el.setAttribute('aria-describedby', desc.id);
+    el.append(img, layer, desc);
     cardEls.set(c.uid, el);
   }
   renderCounters(el.querySelector('.counters'), c.counters ?? []);
@@ -179,16 +188,31 @@ function render() {
   // keyboard would lose the card it was on at each commit.
   const hadFocus = document.activeElement?.closest('.card');
 
-  const seen = new Set();
-  for (const c of game.cards) {
-    seen.add(c.uid);
-    const el = cardEl(c);
-    if (c.owner === 'me') placeFor('me', c).appendChild(el);
-    else if (c.owner === view.opp) placeFor('opp', c).appendChild(el);
-    else el.remove(); // another opponent's: kept, not shown
-  }
+  const inGame = new Set(game.cards.map((c) => c.uid));
+  const shown = new Set(game.cards.filter((c) => c.owner === 'me' || c.owner === view.opp).map((c) => c.uid));
+  // Whatever is not on the table leaves first: a removed card, or one
+  // belonging to an opponent whose tab is down (kept, not shown). Taking
+  // them out before the rest are placed means the cards that stay are not
+  // shuffled along past an element that is on its way out anyway.
   for (const [uid, el] of cardEls) {
-    if (!seen.has(uid)) { el.remove(); cardEls.delete(uid); }
+    if (shown.has(uid)) continue;
+    el.remove();
+    if (!inGame.has(uid)) cardEls.delete(uid);
+  }
+
+  // Where the next card goes in each place, so a card already standing
+  // there is left alone. Inserting an element that is already in the tree
+  // moves it, and a moved element starts its CSS over: the zoom under the
+  // pointer would snap back, and an arrival would play again at every
+  // commit. Only the cards that really changed place are touched.
+  const next = new Map();
+  for (const c of game.cards) {
+    if (!shown.has(c.uid)) continue;
+    const el = cardEl(c);
+    const place = placeFor(c.owner === 'me' ? 'me' : 'opp', c);
+    const i = next.get(place) ?? 0;
+    next.set(place, i + 1);
+    if (place.children[i] !== el) place.insertBefore(el, place.children[i] ?? null);
   }
   // A card that has gone — removed, or another opponent's — leaves the
   // panel about it beside nothing.

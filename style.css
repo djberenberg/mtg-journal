@@ -474,6 +474,18 @@ h3 { font-size: 0.68rem; }
 
 .pile .card.commander::before { font-size: 0.5rem; top: 2px; left: 2px; padding: 0 3px; }
 
+/* Said out loud, never shown: a card's cost, type, text and stats, which a
+   pointer gets from the hover panel instead. Kept out of the label so that
+   focusing a card names it and says where it is before the rules text. */
+.card .sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* --- counters --------------------------------------------------------- */
 
 /* A layer over the card for its counters. The layer takes no pointer

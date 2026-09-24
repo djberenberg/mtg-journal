@@ -101,6 +101,7 @@ try {
   };
   const unhover = async () => { await mouse('mouseMoved', 4, 4, 0); await sleep(250); };
   const peekUi = (sel = '.card') => evalJs(`(()=>{const p=document.getElementById('peek');const r=p.getBoundingClientRect();const c=document.querySelector(${JSON.stringify(sel)})?.getBoundingClientRect()??{left:0,right:0};return {hidden:p.hidden,text:p.textContent,rows:[...p.children].map(e=>e.className),aria:p.getAttribute('aria-hidden'),fixed:getComputedStyle(p).position,gap:Math.round((r.left-c.right)*10)/10,width:Math.round(r.width),inView:r.left>=8&&r.top>=8&&r.right<=innerWidth-8&&r.bottom<=innerHeight-8}})()`);
+  const zoomOf = (sel) => evalJs(`Math.round(new DOMMatrix(getComputedStyle(document.querySelector(${JSON.stringify(sel)})).transform).a * 1000) / 1000`);
   const fieldBoxes = (owner) => evalJs(`(()=>{const z=document.querySelector('.zone[data-owner="${owner}"][data-zone="battlefield"]');return {zone:z.getBoundingClientRect().width,cards:[...z.querySelectorAll('.card')].map(c=>c.getBoundingClientRect().width)}})()`);
   const menuItems = () => evalJs(`[...document.getElementById('menu').children].map(c=>c.tagName==='HR'?'-':c.textContent).join('|')`);
   const menuRect = () => evalJs(`document.getElementById('menu').getBoundingClientRect().toJSON()`);
@@ -161,6 +162,8 @@ try {
   let mr = await menuRect();
   check('the menu opens at the pointer, inside the viewport', Math.abs(mr.left - at.x) <= 1 && (Math.abs(mr.top - at.y) <= 1 || Math.abs(mr.bottom - at.y) <= 1) && mr.right <= (await evalJs('innerWidth')) - 8 && mr.bottom <= (await evalJs('innerHeight')) - 8, JSON.stringify({ at, mr }));
   check('the card it belongs to says its name and where it is', (await el(elvesSel, "e.getAttribute('aria-label')")) === 'Llanowar Elves, hand' && (await el(elvesSel, "e.getAttribute('role')")) === 'group' && (await el(elvesSel, 'e.tabIndex')) === 0);
+  const said = await evalJs(`(()=>{const c=document.querySelector('${elvesSel}');const d=document.getElementById(c.getAttribute('aria-describedby'));const r=d.getBoundingClientRect();return {text:d.textContent, width:Math.round(r.width), height:Math.round(r.height), mine:d.closest('.card')===c}})()`);
+  check('and points a screen reader at what it says: its cost, type, text and stats, read out but not seen', said.mine && said.text === '{G}. Creature — Elf Druid. {T}: Add {G}.. 1/1' && said.width <= 1 && said.height <= 1, JSON.stringify(said));
   await key('Escape', 'Escape', 27); await sleep(80);
   check('escape closes the card menu without doing anything, and the card has the focus', (await el('#menu', 'e.hidden')) && (await zone('me', 'hand')).length === 2 && (await evalJs(`document.activeElement.dataset.uid`)) === hand[1].uid);
   await rightClickAt(`.card[data-uid="${hand[0].uid}"]`);
@@ -178,6 +181,7 @@ try {
   check('play moves the creature to my battlefield, untapped', field.length === 1 && field[0].name === 'Llanowar Elves' && !field[0].tapped && (await zone('me', 'hand')).length === 1, JSON.stringify(field));
   await click(`.card[data-uid="${hand[1].uid}"] img`); await sleep(100); field = await zone('me', 'battlefield');
   check('clicking the card taps it', field[0].tapped && /I tap Llanowar Elves/.test((await ui()).log[0]));
+  await sleep(200); // the turn and the box take 0.15s, and now run to the end: render() no longer cuts them short
   const tappedBox = await evalJs(`(()=>{const c=document.querySelector('.card.tapped');const r=c.getBoundingClientRect();const i=c.querySelector('img').getBoundingClientRect();return {w:Math.round(r.width),h:Math.round(r.height),imgW:Math.round(i.width),imgH:Math.round(i.height),rot:getComputedStyle(c.querySelector('img')).transform!=='none'}})()`);
   check('a tapped card lies on its side: the image is rotated and its box is wider than tall', tappedBox.rot && tappedBox.w > tappedBox.h && Math.abs(tappedBox.w - tappedBox.imgW) <= 1, JSON.stringify(tappedBox));
   await shot('1-tapped');
@@ -460,6 +464,23 @@ try {
   await key('Escape', 'Escape', 27); await sleep(50);
   await menuPick(elvesSel, 'to the battlefield'); await sleep(50);
   check('(the card is back on the battlefield for the checks that follow)', (await zone('me', 'battlefield')).length === 1);
+
+  // render() only puts back the cards that moved: an element re-inserted
+  // into the tree starts its CSS over, zoom and arrival with it.
+  await hover(elvesSel);
+  const zoomed = await zoomOf(elvesSel);
+  await evalJs(`(()=>{window.__put=0;window.__mo?.disconnect();window.__mo=new MutationObserver((ms)=>{for(const m of ms)for(const n of m.addedNodes)if(n.classList?.contains('card'))window.__put++});window.__mo.observe(document.querySelector('.table'),{childList:true,subtree:true})})()`);
+  await click('[data-life="me"][data-by="1"]'); // a commit that moves no card; no sleep, the zoom would be part-way back
+  const zoomedAfter = await zoomOf(elvesSel);
+  await sleep(50);
+  check('a commit that moves no card puts none of them back into the table', (await evalJs(`window.__put`)) === 0);
+  check('so the card under the pointer keeps the zoom it has rather than growing again from nothing', zoomed > 1.05 && zoomedAfter === zoomed, JSON.stringify({ zoomed, zoomedAfter }));
+  await unhover();
+  await menuPick(elvesSel, 'to hand'); await sleep(50);
+  check('and a card that does change zone is put into its new one', (await evalJs(`window.__put`)) === 1 && (await zone('me', 'hand')).length === 1);
+  await menuPick(elvesSel, 'to the battlefield'); await sleep(50);
+  await click('[data-life="me"][data-by="-1"]'); await sleep(50);
+  await evalJs(`window.__mo.disconnect()`);
 
   // the opponent's creature, after my card has been through the picker and a zone change
   const delverSel = `.card[data-uid="${theirs[0].uid}"]`;

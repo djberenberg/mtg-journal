@@ -1278,11 +1278,16 @@ $('new-form').addEventListener('submit', (e) => {
   q.focus();
 });
 
-// "/" goes to the search box from anywhere, as on most sites.
+// "/" goes to the search box from anywhere, as on most sites, and ctrl+Z
+// undoes from anywhere. Neither reaches a field being typed in: not only the
+// search box but a life total being edited, whose blur would commit the half
+// typed number, and the counter kind, where "/" is most of what is typed —
+// "+1/+1" and "-1/-1" are the kinds the picker is there for.
 window.addEventListener('keydown', (e) => {
   if (dialog.open || menuOpen()) return;
-  if (e.key === '/' && document.activeElement !== q) { e.preventDefault(); q.focus(); }
-  if ((e.metaKey || e.ctrlKey) && e.key === 'z' && document.activeElement !== q) { e.preventDefault(); undo(); }
+  const typing = document.activeElement?.matches?.('input, textarea');
+  if (e.key === '/' && !typing) { e.preventDefault(); q.focus(); }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !typing) { e.preventDefault(); undo(); }
 });
 
 render();

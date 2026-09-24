@@ -279,6 +279,18 @@ try {
   await key('Escape', 'Escape', 27); await sleep(50); u = await ui();
   check('escape cancels without changing the total', u.me === '31' && (await el('#life-me', 'e.hidden')) === false && (await el('#life-me + .life-edit', 'e.hidden')) === true, u.me);
 
+  // The page's own keys keep out of a field being typed in: either one would
+  // blur the input, which is what commits it, and the number half typed
+  // would land — on a state the undo had already stepped out from under.
+  await click('#life-me'); await sleep(50);
+  await evalJs(`document.getElementById('life-me').nextElementSibling.value = ''`); await type('4');
+  await key('/', 'Slash', 191); await sleep(80); u = await ui();
+  check('"/" inside an open life editor stays in it: no jump to the search box, and nothing committed', u.me === '31' && u.q === '' && (await el('#life-me + .life-edit', 'e.hidden')) === false && (await evalJs(`document.activeElement === document.getElementById('life-me').nextElementSibling`)), JSON.stringify({ me: u.me, q: u.q, focus: await evalJs('document.activeElement.id || document.activeElement.className') }));
+  await key('z', 'KeyZ', 90, 2); await sleep(80); u = await ui();
+  check('and ctrl+Z inside it does not undo the game out from under the editor', u.me === '31' && /my life is now 31/.test(u.log[0]) && (await el('#life-me + .life-edit', 'e.hidden')) === false, JSON.stringify({ me: u.me, log: u.log[0] }));
+  await key('Escape', 'Escape', 27); await sleep(50); u = await ui();
+  check('(the editor is closed again, the total untouched)', u.me === '31' && (await el('#life-me + .life-edit', 'e.hidden')) === true, u.me);
+
   // render() must leave a half-typed input alone: open it, type without
   // committing, then force a render from an unrelated commit elsewhere.
   await click('#life-me'); await sleep(50);
@@ -658,6 +670,13 @@ try {
   await menuPick(elvesSel, 'add counter…');
   await evalJs(`document.getElementById('ctr-kind').value=''`); await type('lore'); await key('Enter', 'Enter', 13); await sleep(80); sq = await squares();
   check('a custom kind is its own square, below the first', sq.length === 2 && sq[1].k === 'lore' && sq[1].n === '1' && sq[1].top > sq[0].top && /I put a lore counter on/.test((await ui()).log[0]), JSON.stringify(sq));
+  // "/" is most of what this box is for: the kinds are +1/+1 and -1/-1.
+  await menuPick(elvesSel, 'add counter…');
+  await evalJs(`document.getElementById('ctr-kind').value=''`); await type('-1');
+  await key('/', 'Slash', 191); await type('-1'); await sleep(50);
+  check('"/" types into the counter kind rather than jumping to the search box: -1/-1 can be reached from the keyboard', (await el('#ctr-kind', 'e.value')) === '-1/-1' && (await evalJs('document.activeElement.id')) === 'ctr-kind' && (await ui()).q === '', JSON.stringify({ kind: await el('#ctr-kind', 'e.value'), focus: await evalJs('document.activeElement.id') }));
+  await key('Escape', 'Escape', 27); await sleep(80);
+  check('(escape closes the picker, adding nothing)', (await el('#ctr-pick', 'e.hidden')) === true && (await squares()).length === 2);
   const sqBox = await evalJs(`(()=>{const s=document.querySelector('${elvesSel} .counter');const r=s.getBoundingClientRect();const c=document.querySelector('${elvesSel}').getBoundingClientRect();const st=getComputedStyle(s);return {w:r.width,h:r.height,inside:r.left>=c.left&&r.right<=c.right&&r.top>=c.top&&r.bottom<=c.bottom,alpha:parseFloat((st.backgroundColor.match(/[\\d.]+\\)$/)||['1'])[0])}})()`);
   check('a square is small, translucent, and inside the card', sqBox.w < 40 && Math.abs(sqBox.w - sqBox.h) < 1 && sqBox.inside && sqBox.alpha < 0.8, JSON.stringify(sqBox));
   await shot('6-counters');

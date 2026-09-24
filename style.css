@@ -508,7 +508,17 @@ h3 { font-size: 0.68rem; }
 /* Clear of the host's edge for the second, tight from the third on. */
 .card.attached + .card.attached { margin-left: calc(-1 * var(--row-gap) - var(--card-w) * var(--equip-clear)); }
 .card.attached + .card.attached + .card.attached { margin-left: calc(-1 * var(--row-gap) - var(--card-w) * var(--equip-fan)); }
-.card.attached:hover { opacity: 1; }
+/* A tucked card holding the counter picker comes out in front of its host,
+   as hovering brings it out for the pointer. It has to: the card is
+   see-through, so it is a layer of its own, and the picker (z 3) and the
+   counters (z 2) painted inside it are shut under the host's z 1. Opened
+   from the keyboard, where there is no pointer to lift the card, the box
+   would otherwise be painted behind the creature — typeable but not
+   readable. This holds the card out for as long as the picker is on it,
+   whatever the pointer is doing; a tucked card that merely has the focus is
+   left where it is, or it would stand out of the tuck after every menu. */
+.card.attached:hover, .card.attached:has(.ctr-pick:not([hidden])) { opacity: 1; }
+.card.attached:has(.ctr-pick:not([hidden])) { z-index: 3; }
 
 /* A later sibling paints over an earlier one, and the equipment comes after
    its host: so the host needs a layer of its own to stay in front of what is

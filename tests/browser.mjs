@@ -621,6 +621,17 @@ try {
   await clickAt(elvesSel); await sleep(80);
   check('(the creature is untapped again)', !(await zone('me', 'battlefield')).find((c) => c.uid === hand[1].uid).tapped);
 
+  // The picker is painted inside the card it is on, and a tucked card is
+  // behind its host: it has to come out in front while the box is up, or it
+  // would be typed into blind. The pointer is taken off it first, since
+  // hovering lifts it anyway and would hide the fault.
+  await pickAtEdge(bonesSel, 'add counter…'); await sleep(80);
+  await unhover();
+  const pickOnTuck = JSON.parse(await evalJs(`(()=>{const i=document.getElementById('ctr-kind');const r=i.getBoundingClientRect();const top=document.elementFromPoint(Math.round(r.left+r.width/2),Math.round(r.top+r.height/2));const e=document.querySelector('${bonesSel}');return JSON.stringify({on:document.getElementById('ctr-pick').closest('.card')?.dataset.uid,onTop:top===i,z:getComputedStyle(e).zIndex,hostZ:getComputedStyle(e.previousElementSibling).zIndex})})()`));
+  check('add counter… on a tucked equipment brings the card out in front of its host, so the picker can be seen and not just typed into', pickOnTuck.on === bonesUid && pickOnTuck.onTop && Number(pickOnTuck.z) > Number(pickOnTuck.hostZ), JSON.stringify(pickOnTuck));
+  await key('Escape', 'Escape', 27); await sleep(80);
+  check('(the picker is closed and the card is tucked in behind its host again)', (await el('#ctr-pick', 'e.hidden')) === true && (await tucked(bonesUid)).attached && Number((await tucked(bonesUid)).z) < Number((await tucked(bonesUid)).hostZ), JSON.stringify(await tucked(bonesUid)));
+
   // several on one creature: a fan, every card of it still worth pointing at
   await pickAtEdge(bonesSel, 'copy'); await sleep(120);
   const copy1 = (await rowOf('spells'))[2];

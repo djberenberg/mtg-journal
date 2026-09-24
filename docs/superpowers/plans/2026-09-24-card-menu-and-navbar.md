@@ -726,3 +726,124 @@ squares; do not add a second independent drag system.
   unchanged
 - the order survives a reload
 - undo puts the order back
+
+## Task 11 — equipment, and what it is attached to
+
+Added to the plan on 2026-09-24, after the original approval. Runs after
+Task 10 and **before** Task 8, so the sweep and the README cover it.
+
+**Files:** `game.js`, `app.js`, `style.css`, `tests/game.test.mjs`,
+`tests/browser.mjs`
+
+An Equipment on the battlefield can be attached to a creature its owner
+controls, and it then sits tucked behind that creature on the table.
+
+### The rules
+
+Two new predicates beside `isPermanent` and `isLand`, both reading the front
+face only, as those do:
+
+```js
+export const isEquipment = (card) => /\bEquipment\b/.test(front(card));
+export const isCreature  = (card) => /\bCreature\b/.test(front(card));
+```
+
+Factor the existing `(card.typeLine || '').split('//')[0]` out into a
+module-local `front(card)` so all four predicates share it.
+
+The attachment lives on the equipment's instance as `attachedTo: <host uid>`,
+absent when it is attached to nothing.
+
+```js
+export function equip(state, uid, hostUid)     // attach
+export function unequip(state, uid)            // detach
+```
+
+`equip` returns `state` unchanged unless **all** of these hold: the
+equipment exists and `isEquipment` is true of it; the host exists and
+`isCreature` is true of it; both are on the battlefield; both have the same
+`owner`; and `uid !== hostUid`. Re-equipping to a different host is allowed
+and simply moves it. Equipping to the host it is already on is a no-op that
+returns the same state.
+
+Log: `` `${who(state, owner, 'equip')} ${host.name} with ${eq.name}` `` —
+"I equip Llanowar Elves with Bonesplitter". `unequip` logs
+`` `${label(state, owner, 'possessive')} ${eq.name} comes off ${host.name}` ``.
+
+**The attachment is not allowed to outlive either card.** Add a module-local
+helper and call it from `moveTo`, `play`, and `remove`:
+- an equipment that leaves the battlefield loses its `attachedTo`
+- a creature that leaves the battlefield, or is removed, clears
+  `attachedTo` on every equipment pointing at it
+Neither of these adds a log line of its own — the move already logs.
+
+`copyCard` must not copy `attachedTo`: a copy arrives attached to nothing,
+the same way it arrives untapped and without counters.
+
+`load()` must drop an `attachedTo` that points at a uid that is not on the
+table, or at a card that is not a creature on the battlefield, so a save
+written by a future bug cannot strand a card.
+
+### The menu
+
+In `itemsFor`, when the card is an Equipment on the battlefield, add — after
+`copy`, before the first separator:
+
+- one `equip <creature name>` item per creature on the same battlefield with
+  the same owner, in the order they sit on the table, each running
+  `commit(G.equip(game, uid, hostUid))`. The item for the host it is
+  already attached to is `disabled`.
+- an `unequip` item when it is attached, running `commit(G.unequip(game, uid))`.
+- when the owner controls no creature, a single **disabled** item reading
+  `no creature to equip`, so the reason is visible rather than the option
+  silently missing.
+
+A creature's own menu is unchanged.
+
+### The page
+
+An attached equipment is drawn immediately after its host in the same tier,
+tucked behind it: a `.card.attached` class that pulls it left with a
+negative margin so it overlaps its host by roughly two thirds, sits behind
+it (`z-index` below the host, which needs a `z-index` of its own to win),
+and is slightly dimmed. Hovering it still brings it forward and shows its
+panel — the hover `z-index` from Task 4 must beat the host's.
+
+`render()` currently places cards in state order. Place an attached
+equipment directly after its host instead, wherever the host is, and give
+the host a `.has-equipment` class so it can carry the `z-index`. A host with
+several equipment shows them fanned: each one after the first is pulled a
+little further left.
+
+### Tests
+
+`tests/game.test.mjs`:
+- `isEquipment` and `isCreature` on a real Scryfall type line, including a
+  double-faced card where the front face decides
+- `equip` attaches, logs `I equip Llanowar Elves with Bonesplitter`, and
+  moving it to a second creature re-attaches with a second log line
+- `equip` returns the same state for: a non-equipment, a non-creature host,
+  either card off the battlefield, two different owners, `uid === hostUid`,
+  and the host it is already on
+- `unequip` detaches and logs; `unequip` on an unattached card is a no-op
+- the host leaving the battlefield, or being removed, clears `attachedTo`
+- the equipment leaving the battlefield clears its own `attachedTo`
+- `copyCard` on an attached equipment yields a copy attached to nothing
+- `load()` drops an `attachedTo` pointing at a missing card, and one
+  pointing at a card that is not a creature on the battlefield
+
+`tests/browser.mjs`:
+- an Equipment's menu lists the creatures on its battlefield, and a
+  creature's menu does not gain an equip item
+- with no creature out, the menu shows the disabled `no creature to equip`
+- choosing one attaches it: the log says so, the card carries `.attached`,
+  and it is drawn immediately after its host
+- the item for the current host is disabled, and `unequip` is offered
+- `unequip` detaches and the card returns to its own place in the row
+- sending the host to the graveyard detaches the equipment
+- the attachment survives a reload, and undo steps it back
+
+A new fixture is needed for an Equipment card; add
+`tests/fixtures/bonesplitter.json` in the shape of the existing fixtures
+(a real Scryfall `/cards/named` response, trimmed to the fields
+`parseCard` reads) and wire it into the stub's `byName` map.

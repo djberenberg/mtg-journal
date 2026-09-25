@@ -5,9 +5,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseCard } from '../scryfall.js';
 import {
-  newGame, addCard, play, toggleTap, moveTo, remove, nextTurn, adjustLife,
+  newGame, addCard, play, toggleTap, moveTo, remove, nextTurn, adjustLife, setLife,
   isPermanent, cardsIn, load, players, label, setOpponents, MAX_OPPONENTS, resetGame,
   parseCounterKind, addCounter, adjustCounter, moveCounter, isLand, copyCard,
+  commanders, adjustCommanderDamage, reorderCard, isEquipment, isCreature, equip, unequip,
 } from '../game.js';
 
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url)));
@@ -15,6 +16,7 @@ const BOLT = parseCard(fixture('bolt'));
 const ELVES = parseCard(fixture('elves'));
 const DELVER = parseCard(fixture('delver'));
 const FOREST = parseCard(fixture('forest'));
+const BONES = parseCard(fixture('bonesplitter'));
 
 const last = (s) => s.log[s.log.length - 1];
 const only = (s, owner, zone) => { const c = cardsIn(s, owner, zone); assert.equal(c.length, 1); return c[0]; };
@@ -158,6 +160,38 @@ test('adjustLife changes a total and logs the result', () => {
   assert.equal(adjustLife(g, 'me', 0), g);
 });
 
+test('setLife sets a total outright and logs it', () => {
+  const g = setLife(newGame(), 'me', 34);
+  assert.equal(g.life.me, 34);
+  assert.match(last(g).text, /my life is now 34/);
+});
+
+test('setLife sets a named opponent\'s life, with the possessive label', () => {
+  const g = setLife(newGame({ opponents: 2 }), 'opp2', 12);
+  assert.equal(g.life.opp2, 12);
+  assert.match(last(g).text, /opponent 2's life is now 12/);
+});
+
+test('setLife accepts zero and negative totals: the journal does not enforce the rules', () => {
+  let g = setLife(newGame(), 'me', 0);
+  assert.equal(g.life.me, 0);
+  g = setLife(g, 'me', -5);
+  assert.equal(g.life.me, -5);
+  assert.match(last(g).text, /my life is now -5/);
+});
+
+test('setLife rounds a fractional total', () => {
+  const g = setLife(newGame(), 'me', 33.6);
+  assert.equal(g.life.me, 34);
+});
+
+test('setLife refuses an unknown player, a non-numeric value, or no change', () => {
+  const g = newGame();
+  assert.equal(setLife(g, 'opp2', 10), g, 'not at the table');
+  assert.equal(setLife(g, 'me', 'x'), g, 'not a number');
+  assert.equal(setLife(g, 'me', 20), g, 'already there');
+});
+
 test('every log line carries the turn it happened on', () => {
   let g = nextTurn(addCard(newGame(), ELVES, 'me'));
   g = play(g, only(g, 'me', 'hand').uid);
@@ -202,6 +236,15 @@ test('a game can start with up to three opponents and a chosen life total', () =
   assert.equal(g.startingLife, 40);
   assert.equal(newGame({ opponents: 7 }).opponents, 3, 'clamped');
   assert.equal(newGame({ opponents: 0 }).opponents, 1, 'clamped');
+});
+
+test('newGame clamps a bad or out-of-range life to a sane total', () => {
+  let g = newGame({ life: 40 });
+  assert.deepEqual(g.life, { me: 40, opp1: 40 });
+  assert.match(last(g).text, /40 life/);
+  assert.equal(newGame({ life: 'x' }).startingLife, 20, 'not a number: falls back to 20');
+  assert.equal(newGame({ life: 5000 }).startingLife, 999, 'clamped to the top');
+  assert.equal(newGame({ life: 0 }).startingLife, 1, 'clamped to the bottom, not the 20 fallback');
 });
 
 test('labels: "opponent" alone with one opponent, numbered with more', () => {
@@ -309,6 +352,13 @@ test('resetGame starts over with the same seats and starting life', () => {
   assert.equal(r.log.length, 1);
   assert.match(last(r).text, /game reset: 3 opponents, 40 life/);
   assert.equal(r.nextUid, 1);
+});
+
+test('resetGame runs a bad starting life through the same guard newGame does', () => {
+  const g = { ...newGame(), startingLife: 'x' };
+  assert.equal(resetGame(g).startingLife, 20, 'not a number: the 20 fallback, not the raw value');
+  assert.deepEqual(resetGame(g).life, { me: 20, opp1: 20 });
+  assert.equal(resetGame({ ...newGame(), startingLife: 5000 }).startingLife, 999, 'clamped to the top');
 });
 
 // --- counters ------------------------------------------------------------
@@ -460,4 +510,341 @@ test('copyCard works in any zone, and ignores an unknown uid', () => {
   g = copyCard(g, only(g, 'me', 'hand').uid);
   assert.equal(cardsIn(g, 'me', 'hand').length, 2);
   assert.equal(copyCard(g, 'nope'), g);
+});
+
+// --- the order on the table ----------------------------------------------
+
+// Three of my creatures and two of my lands on the battlefield, and one of
+// the opponent's creatures, so every row a reorder must leave alone is
+// there to be left alone. The uids are '1' to '6' in that order.
+const board = () => {
+  let g = newGame();
+  for (const c of [ELVES, DELVER, ELVES, FOREST, FOREST]) g = addCard(g, c, 'me', 'battlefield');
+  return addCard(g, ELVES, 'opp1', 'battlefield');
+};
+const run = (g, owner, lands) => cardsIn(g, owner, 'battlefield').filter((c) => isLand(c) === lands).map((c) => c.uid).join('');
+
+test('reorderCard moves a card in front of a named neighbour in its own row', () => {
+  const g = reorderCard(board(), '3', '1');
+  assert.equal(run(g, 'me', false), '312');
+  assert.equal(run(g, 'me', true), '45', 'my lands are where they were');
+  assert.equal(run(g, 'opp1', false), '6');
+  assert.deepEqual(g.cards.map((c) => c.uid), ['3', '1', '2', '4', '5', '6']);
+});
+
+test('with no card to go in front of, it goes last in its own row and no further', () => {
+  const g = reorderCard(board(), '1', null);
+  assert.equal(run(g, 'me', false), '231');
+  assert.equal(run(g, 'me', true), '45');
+  assert.equal(run(g, 'opp1', false), '6');
+  // Not the end of the whole array: that would look the same and churn the save.
+  assert.deepEqual(g.cards.map((c) => c.uid), ['2', '3', '1', '4', '5', '6']);
+  assert.equal(run(reorderCard(board(), '4', null), 'me', true), '54', 'the lands row reorders on its own');
+});
+
+test('a reorder that would cross a row, a player, a zone, or change nothing is no reorder at all', () => {
+  const g = board();
+  assert.equal(reorderCard(g, 'nope', '1'), g, 'an unknown card');
+  assert.equal(reorderCard(g, '1', 'nope'), g, 'an unknown neighbour');
+  assert.equal(reorderCard(g, '1', '1'), g, 'in front of itself');
+  assert.equal(reorderCard(g, '4', '1'), g, 'a land into the spells row');
+  assert.equal(reorderCard(g, '1', '4'), g, 'a spell into the lands row');
+  assert.equal(reorderCard(g, '1', '6'), g, 'into another player\'s row');
+  assert.equal(reorderCard(g, '1', '2'), g, 'already in front of it');
+  assert.equal(reorderCard(g, '3', null), g, 'already last in its row');
+  assert.equal(reorderCard(g, '6', null), g, 'the only card in its row');
+  const h = addCard(addCard(g, BOLT, 'me'), BOLT, 'me');
+  assert.equal(reorderCard(h, '7', '8'), h, 'a hand is not the battlefield');
+  assert.equal(reorderCard(h, '7', null), h);
+  assert.equal(reorderCard(h, '7', '1'), h, 'nor is one in hand a neighbour of one on the table');
+});
+
+test('a move past cards it is never drawn beside is no move at all', () => {
+  // Two of my creatures with the opponent's card sitting between them in
+  // the array: the run they are drawn in is the same after as before, so
+  // there is nothing to save and nothing to undo.
+  let g = addCard(newGame(), ELVES, 'me', 'battlefield');
+  g = addCard(g, ELVES, 'opp1', 'battlefield');
+  g = addCard(g, DELVER, 'me', 'battlefield');
+  assert.equal(reorderCard(g, '1', '3'), g, 'already in front of it, whatever lies between');
+  assert.equal(reorderCard(g, '3', null), g, 'already last in its run');
+  assert.notEqual(reorderCard(g, '3', '1'), g, 'and a real move is still a move');
+});
+
+test('a reorder is presentation, like a counter square: no log line', () => {
+  const g = board();
+  const h = reorderCard(g, '3', '1');
+  assert.notEqual(h, g);
+  assert.equal(h.log.length, g.log.length);
+  assert.deepEqual(g.cards.map((c) => c.uid), ['1', '2', '3', '4', '5', '6'], 'and the state it came from is untouched');
+  assert.deepEqual(load(JSON.stringify(h)), h, 'a reordered game saves and loads');
+});
+
+// --- commander damage ----------------------------------------------------
+
+// My Llanowar Elves in the command zone, and the uid it is tracked by.
+const withCommander = (opponents = 1) => {
+  const g = addCard(newGame({ opponents }), ELVES, 'me', 'command');
+  return [g, only(g, 'me', 'command').uid];
+};
+
+test('commanders: only the cards that have been in a command zone', () => {
+  let g = addCard(newGame(), BOLT, 'me');
+  assert.deepEqual(commanders(g), []);
+  g = addCard(g, ELVES, 'me', 'command');
+  g = addCard(g, FOREST, 'opp1', 'command');
+  assert.deepEqual(commanders(g).map((c) => c.name), ['Llanowar Elves', 'Forest']);
+  g = moveTo(g, only(g, 'me', 'command').uid, 'battlefield');
+  assert.equal(commanders(g).length, 2, 'cast, it is still the commander');
+});
+
+test('commander damage ticks up and takes the life with it', () => {
+  const [g0, uid] = withCommander();
+  let g = adjustCommanderDamage(g0, 'opp1', uid, 4);
+  assert.deepEqual(g.cmdDamage.opp1, { [uid]: 4 });
+  assert.equal(g.life.opp1, 16);
+  assert.equal(last(g).text, "opponent's 4 from Llanowar Elves (4), 16 life");
+
+  g = adjustCommanderDamage(g, 'opp1', uid, 3);
+  assert.equal(g.cmdDamage.opp1[uid], 7);
+  assert.equal(g.life.opp1, 13);
+  assert.equal(last(g).text, "opponent's 3 from Llanowar Elves (7), 13 life");
+  assert.equal(g.life.me, 20, 'nobody else is touched');
+});
+
+test('a correction gives back only what was applied, and zero is no entry at all', () => {
+  const [g0, uid] = withCommander();
+  let g = adjustCommanderDamage(g0, 'opp1', uid, 7);
+  g = adjustCommanderDamage(g, 'opp1', uid, -1);
+  assert.equal(g.cmdDamage.opp1[uid], 6);
+  assert.equal(g.life.opp1, 14);
+  assert.equal(last(g).text, "opponent's \u22121 from Llanowar Elves (6), 14 life");
+
+  g = adjustCommanderDamage(g, 'opp1', uid, -10);
+  assert.deepEqual(g.cmdDamage.opp1, {}, 'a tally of zero is deleted, not written');
+  assert.equal(g.life.opp1, 20, 'six back, not ten');
+  assert.equal(last(g).text, "opponent's \u22126 from Llanowar Elves (0), 20 life");
+  assert.equal(adjustCommanderDamage(g, 'opp1', uid, -1), g, 'nothing left to take back');
+});
+
+test('twenty-one is lethal, and said once: on the crossing', () => {
+  const [g0, uid] = withCommander();
+  let g = adjustCommanderDamage(g0, 'opp1', uid, 20);
+  assert.equal(g.log.filter((l) => /dead to/.test(l.text)).length, 0);
+  g = adjustCommanderDamage(g, 'opp1', uid, 1);
+  assert.equal(last(g).text, 'opponent is dead to commander damage from Llanowar Elves (21)');
+  assert.equal(g.log.at(-2).text, "opponent's 1 from Llanowar Elves (21), -1 life");
+  g = adjustCommanderDamage(g, 'opp1', uid, 1);
+  assert.equal(g.log.filter((l) => /dead to/.test(l.text)).length, 1, '21 to 22 is not news');
+});
+
+test('the lethal line is in the first person when it is me', () => {
+  let g = addCard(newGame(), ELVES, 'opp1', 'command');
+  const uid = only(g, 'opp1', 'command').uid;
+  g = adjustCommanderDamage(g, 'me', uid, 21);
+  assert.equal(g.log.at(-2).text, 'my 21 from Llanowar Elves (21), -1 life');
+  assert.equal(last(g).text, 'I am dead to commander damage from Llanowar Elves (21)');
+});
+
+test('with several opponents the line names the one who took it', () => {
+  const [g0, uid] = withCommander(2);
+  const g = adjustCommanderDamage(g0, 'opp2', uid, 4);
+  assert.equal(last(g).text, "opponent 2's 4 from Llanowar Elves (4), 16 life");
+  assert.deepEqual(Object.keys(g.cmdDamage), ['opp2']);
+});
+
+test('partners keep a tally each: neither counts toward the other\'s twenty-one', () => {
+  let g = addCard(addCard(newGame(), ELVES, 'me', 'command'), FOREST, 'me', 'command');
+  const [one, two] = cardsIn(g, 'me', 'command').map((c) => c.uid);
+  g = adjustCommanderDamage(g, 'opp1', one, 20);
+  g = adjustCommanderDamage(g, 'opp1', two, 20);
+  assert.deepEqual(g.cmdDamage.opp1, { [one]: 20, [two]: 20 });
+  assert.equal(g.life.opp1, -20, 'forty life gone between them');
+  assert.equal(g.log.filter((l) => /dead to/.test(l.text)).length, 0, 'forty is not twenty-one from one of them');
+  g = adjustCommanderDamage(g, 'opp1', two, 1);
+  assert.equal(g.cmdDamage.opp1[one], 20, 'the other tally is left alone');
+  assert.equal(last(g).text, 'opponent is dead to commander damage from Forest (21)');
+});
+
+test('a commander deals no commander damage to its own controller, and nothing else does any', () => {
+  const [g, uid] = withCommander();
+  const plain = addCard(g, BOLT, 'me');
+  assert.equal(adjustCommanderDamage(g, 'me', uid, 3), g, 'not to the player it belongs to');
+  assert.equal(adjustCommanderDamage(g, 'opp2', uid, 3), g, 'nobody is in that seat');
+  assert.equal(adjustCommanderDamage(g, 'opp1', 'nope', 3), g, 'no such card');
+  assert.equal(adjustCommanderDamage(plain, 'opp1', only(plain, 'me', 'hand').uid, 3), plain, 'not a commander');
+  for (const delta of [0, NaN, Infinity, 'x', null, undefined, 0.4]) {
+    assert.equal(adjustCommanderDamage(g, 'opp1', uid, delta), g, String(delta));
+  }
+});
+
+test('removing a commander clears its tallies everywhere', () => {
+  const [g0, uid] = withCommander(2);
+  let g = adjustCommanderDamage(adjustCommanderDamage(g0, 'opp1', uid, 4), 'opp2', uid, 6);
+  g = remove(g, uid);
+  assert.deepEqual(g.cmdDamage, { opp1: {}, opp2: {} });
+  assert.equal(g.life.opp1, 16, 'the life it took stands: it was taken');
+});
+
+test('unseating an opponent takes their tallies with them', () => {
+  const [g0, uid] = withCommander(2);
+  let g = adjustCommanderDamage(g0, 'opp2', uid, 4);
+  g = setOpponents(g, 1);
+  assert.deepEqual(g.cmdDamage, {});
+});
+
+test('a new game and a reset start at no commander damage', () => {
+  const [g0, uid] = withCommander();
+  const g = adjustCommanderDamage(g0, 'opp1', uid, 4);
+  assert.deepEqual(newGame().cmdDamage, {});
+  assert.deepEqual(resetGame(g).cmdDamage, {});
+});
+
+test('a save from before commander damage opens without it, not rejected', () => {
+  const [g0, uid] = withCommander();
+  const g = adjustCommanderDamage(g0, 'opp1', uid, 4);
+  assert.deepEqual(load(JSON.stringify(g)), g, 'and one with it comes back as it was');
+  const { cmdDamage, ...old } = g;
+  assert.deepEqual(load(JSON.stringify(old)), { ...old, cmdDamage: {} });
+  for (const junk of [[], 'x', 3, null]) {
+    assert.deepEqual(load(JSON.stringify({ ...old, cmdDamage: junk })), { ...old, cmdDamage: {} }, JSON.stringify(junk));
+  }
+});
+
+// --- equipment -----------------------------------------------------------
+
+// My Bonesplitter and two of my creatures, all three on my battlefield:
+// the uids are '1' for the equipment, '2' and '3' for the creatures.
+const armed = () => {
+  let g = addCard(newGame(), BONES, 'me', 'battlefield');
+  g = addCard(g, ELVES, 'me', 'battlefield');
+  return addCard(g, DELVER, 'me', 'battlefield');
+};
+const card = (g, uid) => g.cards.find((c) => c.uid === uid);
+
+test('isEquipment and isCreature: the front face decides, as it does for a land', () => {
+  assert.equal(isEquipment(BONES), true);
+  assert.equal(isCreature(BONES), false);
+  assert.equal(isCreature(ELVES), true);
+  assert.equal(isEquipment(ELVES), false);
+  assert.equal(isCreature(DELVER), true, 'both faces are creatures');
+  assert.equal(isCreature(FOREST), false);
+  assert.equal(isCreature({ typeLine: 'Enchantment — Aura // Creature — Spirit' }), false, 'the back face is not the card');
+  assert.equal(isEquipment({ typeLine: 'Legendary Artifact — Equipment' }), true);
+  assert.equal(isEquipment({ typeLine: 'Instant // Artifact — Equipment' }), false);
+  assert.equal(isCreature({}), false);
+});
+
+test('equip attaches an equipment to a creature and says so', () => {
+  const g = equip(armed(), '1', '2');
+  assert.equal(card(g, '1').attachedTo, '2');
+  assert.equal(last(g).text, 'I equip Llanowar Elves with Bonesplitter');
+  assert.equal(card(g, '2').attachedTo, undefined, 'the creature carries nothing: the attachment is the equipment\'s');
+});
+
+test('equipping a second creature moves it, with a line of its own', () => {
+  const g0 = equip(armed(), '1', '2');
+  const g = equip(g0, '1', '3');
+  assert.equal(card(g, '1').attachedTo, '3');
+  assert.equal(g.log.length, g0.log.length + 1);
+  assert.match(last(g).text, /I equip Delver of Secrets .* with Bonesplitter/);
+});
+
+test('the opponent equips their own, in their own words', () => {
+  let g = addCard(newGame(), BONES, 'opp1', 'battlefield');
+  g = addCard(g, ELVES, 'opp1', 'battlefield');
+  g = equip(g, '1', '2');
+  assert.equal(card(g, '1').attachedTo, '2');
+  assert.equal(last(g).text, 'opponent equips Llanowar Elves with Bonesplitter');
+});
+
+test('equip refuses anything that is not an equipment on a creature of its owner\'s, on the battlefield', () => {
+  const g = armed();
+  assert.equal(equip(g, '2', '3'), g, 'a creature is not an equipment');
+  assert.equal(equip(g, '1', '1'), g, 'nothing is equipped with itself');
+  assert.equal(equip(g, '1', 'nope'), g, 'an unknown host');
+  assert.equal(equip(g, 'nope', '2'), g, 'an unknown equipment');
+  const land = addCard(g, FOREST, 'me', 'battlefield');
+  assert.equal(equip(land, '1', '4'), land, 'a land is not a creature');
+  const inHand = moveTo(g, '1', 'hand');
+  assert.equal(equip(inHand, '1', '2'), inHand, 'the equipment is not on the battlefield');
+  const away = moveTo(g, '2', 'graveyard');
+  assert.equal(equip(away, '1', '2'), away, 'the creature is not on the battlefield');
+  const theirs = addCard(g, ELVES, 'opp1', 'battlefield');
+  assert.equal(equip(theirs, '1', '4'), theirs, 'a creature across the table');
+  const on = equip(g, '1', '2');
+  assert.equal(equip(on, '1', '2'), on, 'the creature it is already on');
+});
+
+test('unequip takes it off and says so; on a card wearing nothing it is nothing', () => {
+  const g0 = equip(armed(), '1', '2');
+  const g = unequip(g0, '1');
+  assert.equal('attachedTo' in card(g, '1'), false, 'the key goes, so a save carries no attachment to nowhere');
+  assert.equal(last(g).text, 'my Bonesplitter comes off Llanowar Elves');
+  assert.equal(unequip(g, '1'), g, 'nothing to take off');
+  assert.equal(unequip(g, '2'), g, 'a creature is wearing nothing either');
+  assert.equal(unequip(g, 'nope'), g);
+});
+
+test('the creature leaving the battlefield, or being removed, takes the equipment off', () => {
+  const g0 = equip(armed(), '1', '2');
+  for (const g of [moveTo(g0, '2', 'graveyard'), remove(g0, '2'), moveTo(g0, '2', 'command')]) {
+    assert.equal('attachedTo' in card(g, '1'), false);
+    assert.equal(g.log.length, g0.log.length + 1, 'the move says it; the detaching adds no line');
+  }
+  assert.equal(card(play(addCard(g0, BONES, 'me'), '4'), '1').attachedTo, '2', 'and another card played leaves it on');
+});
+
+test('the equipment leaving the battlefield comes off by itself', () => {
+  const g0 = equip(armed(), '1', '2');
+  for (const g of [moveTo(g0, '1', 'graveyard'), moveTo(g0, '1', 'hand'), remove(g0, '2')]) {
+    assert.equal(card(g, '1')?.attachedTo, undefined);
+  }
+  // Back in hand and played again, it comes out onto the table on nothing.
+  const again = play(moveTo(g0, '1', 'hand'), '1');
+  assert.equal('attachedTo' in card(again, '1'), false);
+});
+
+test('a copy of an attached equipment arrives on nothing, as it arrives untapped', () => {
+  const g = copyCard(equip(armed(), '1', '2'), '1');
+  assert.equal(card(g, '1').attachedTo, '2', 'the original is as it was');
+  assert.equal('attachedTo' in card(g, '4'), false);
+});
+
+test('an attached equipment has no place of its own in the row, so it does not reorder', () => {
+  const g = equip(armed(), '1', '2');
+  assert.equal(reorderCard(g, '1', '3'), g, 'it goes where its host goes');
+  assert.equal(reorderCard(g, '1', null), g);
+  assert.notEqual(reorderCard(g, '3', '2'), g, 'the creatures either side of it still move');
+});
+
+test('a game with an equipment on a creature saves and loads', () => {
+  const g = equip(armed(), '1', '2');
+  assert.deepEqual(load(JSON.stringify(g)), g);
+});
+
+test('load drops an attachment that points at no creature on the battlefield, and keeps the game', () => {
+  const g = equip(armed(), '1', '2');
+  const strand = (cards) => load(JSON.stringify({ ...g, cards }));
+  const gone = strand(g.cards.filter((c) => c.uid !== '2'));
+  assert.equal('attachedTo' in gone.cards[0], false, 'a host that is not on the table at all');
+  assert.equal(gone.cards.length, 2, 'and the rest of the game opens as it was');
+  const buried = strand(g.cards.map((c) => (c.uid === '2' ? { ...c, zone: 'graveyard' } : c)));
+  assert.equal('attachedTo' in buried.cards[0], false, 'a host that is off the battlefield');
+  const notACreature = strand(g.cards.map((c) => (c.uid === '2' ? { ...c, typeLine: 'Enchantment' } : c)));
+  assert.equal('attachedTo' in notACreature.cards[0], false, 'a host that is not a creature');
+  const itself = strand(g.cards.map((c) => (c.uid === '1' ? { ...c, attachedTo: '1' } : c)));
+  assert.equal(itself.cards[0].attachedTo, undefined, 'and one pointing at itself is no creature either');
+});
+
+test('load drops an attachment held by anything but an equipment on the battlefield', () => {
+  const g = equip(armed(), '1', '2');
+  const held = (cards) => load(JSON.stringify({ ...g, cards })).cards[0];
+  assert.equal('attachedTo' in held(g.cards.map((c) => (c.uid === '1' ? { ...c, zone: 'hand' } : c))), false, 'a card in hand is on nothing');
+  assert.equal('attachedTo' in held(g.cards.map((c) => (c.uid === '1' ? { ...c, typeLine: 'Artifact' } : c))), false, 'and so is a card that is no equipment');
+  // A creature wearing an attachment is the same mistake the other way up:
+  // it would draw tucked in behind another card and have no way off.
+  const onACreature = load(JSON.stringify({ ...g, cards: g.cards.map((c) => (c.uid === '3' ? { ...c, attachedTo: '2' } : c)) }));
+  assert.equal('attachedTo' in onACreature.cards[2], false);
+  assert.equal(onACreature.cards[0].attachedTo, '2', 'the real attachment is left alone');
 });
